@@ -189,6 +189,12 @@ static void *hook_swift_unknownObjectWeakLoadStrong(void *ref) {
 @interface _TtC6Twitch26SubscriberOnlyOverlayView : UIView
 @end
 
+@interface _TtC6Twitch11PaywallView : UIView
+@end
+
+@interface _TtC6Twitch23VideoPlayerPaywallView : UIView
+@end
+
 %hook _TtC6Twitch27VideoPreviewCardRestrictionView
 - (void)didMoveToWindow {
   %orig;
@@ -199,6 +205,24 @@ static void *hook_swift_unknownObjectWeakLoadStrong(void *ref) {
 %end
 
 %hook _TtC6Twitch26SubscriberOnlyOverlayView
+- (void)didMoveToWindow {
+  %orig;
+  if ([tweakDefaults boolForKey:@"TWAdBlockRestrictionRemoverEnabled"]) {
+    self.hidden = YES;
+  }
+}
+%end
+
+%hook _TtC6Twitch11PaywallView
+- (void)didMoveToWindow {
+  %orig;
+  if ([tweakDefaults boolForKey:@"TWAdBlockRestrictionRemoverEnabled"]) {
+    self.hidden = YES;
+  }
+}
+%end
+
+%hook _TtC6Twitch23VideoPlayerPaywallView
 - (void)didMoveToWindow {
   %orig;
   if ([tweakDefaults boolForKey:@"TWAdBlockRestrictionRemoverEnabled"]) {

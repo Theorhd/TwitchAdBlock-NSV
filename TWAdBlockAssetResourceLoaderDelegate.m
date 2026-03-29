@@ -17,13 +17,18 @@ extern NSUserDefaults *tweakDefaults;
 
   BOOL isVOD = [request.URL.path containsString:@"/vod/"];
   BOOL vodUnlockEnabled = [tweakDefaults boolForKey:@"TWAdBlockVODUnlockEnabled"];
+  BOOL proxyEnabled = [tweakDefaults boolForKey:@"TWAdBlockProxyEnabled"];
 
-  NSString *proxy = [tweakDefaults boolForKey:@"TWAdBlockCustomProxyEnabled"]
-                        ? [tweakDefaults stringForKey:@"TWAdBlockProxy"]
-                        : PROXY_ADDR;
-
-  NSURLSession *session = [[NSURLSession alloc] twab_proxySessionWithAddress:proxy];
-
+  NSURLSession *session;
+  if (proxyEnabled) {
+      NSString *proxy = [tweakDefaults boolForKey:@"TWAdBlockCustomProxyEnabled"]
+                            ? [tweakDefaults stringForKey:@"TWAdBlockProxy"]
+                            : PROXY_ADDR;
+      session = [[NSURLSession alloc] twab_proxySessionWithAddress:proxy];
+  } else {
+      session = [NSURLSession sharedSession];
+  }
+  
   [[session dataTaskWithRequest:request
               completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
                 if (error) return [loadingRequest finishLoadingWithError:error];
