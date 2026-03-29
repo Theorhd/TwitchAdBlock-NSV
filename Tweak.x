@@ -65,39 +65,6 @@ TWAdBlockAssetResourceLoaderDelegate *assetResourceLoaderDelegate;
 }
 %end
 
-%hook _TtC6Twitch27AssetResourceLoaderDelegate
-%new
-- (BOOL)handleLoadingRequest:(AVAssetResourceLoadingRequest *)loadingRequest {
-  NSURL *URL = loadingRequest.request.URL;
-  if (![URL.scheme isEqualToString:@"twab"]) return NO;
-  AVAssetResourceLoadingDataRequest *dataRequest = loadingRequest.dataRequest;
-  NSURLComponents *components = [NSURLComponents componentsWithURL:URL resolvingAgainstBaseURL:YES];
-  components.scheme = @"https";
-  NSMutableURLRequest *request = loadingRequest.request.mutableCopy;
-  request.URL = components.URL;
-  NSString *proxy = [tweakDefaults boolForKey:@"TWAdBlockCustomProxyEnabled"]
-                        ? [tweakDefaults stringForKey:@"TWAdBlockProxy"]
-                        : PROXY_ADDR;
-  NSURLSession *session = [[NSURLSession alloc] twab_proxySessionWithAddress:proxy];
-  [[session dataTaskWithRequest:request
-              completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-                if (error) return [loadingRequest finishLoadingWithError:error];
-                loadingRequest.contentInformationRequest.contentType = AVFileTypeMPEG4;
-                [dataRequest respondWithData:data];
-                [loadingRequest finishLoading];
-              }] resume];
-  return YES;
-}
-- (BOOL)resourceLoader:(AVAssetResourceLoader *)resourceLoader
-    shouldWaitForLoadingOfRequestedResource:(AVAssetResourceLoadingRequest *)loadingRequest {
-  return ![self handleLoadingRequest:loadingRequest] ? %orig : YES;
-}
-- (BOOL)resourceLoader:(AVAssetResourceLoader *)resourceLoader
-    shouldWaitForRenewalOfRequestedResource:(AVAssetResourceRenewalRequest *)renewalRequest {
-  return ![self handleLoadingRequest:renewalRequest] ? %orig : YES;
-}
-%end
-
 %hook AVPlayer
 - (instancetype)init {
   if ((self = %orig)) {
@@ -214,6 +181,26 @@ static void *hook_swift_unknownObjectWeakLoadStrong(void *ref) {
 }
 %end
 
+// Restriction Remover UI Hooks
+
+%hook _TtC6Twitch27VideoPreviewCardRestrictionView
+- (void)didMoveToWindow {
+  %orig;
+  if ([tweakDefaults boolForKey:@"TWAdBlockRestrictionRemoverEnabled"]) {
+    self.hidden = YES;
+  }
+}
+%end
+
+%hook _TtC6Twitch26SubscriberOnlyOverlayView
+- (void)didMoveToWindow {
+  %orig;
+  if ([tweakDefaults boolForKey:@"TWAdBlockRestrictionRemoverEnabled"]) {
+    self.hidden = YES;
+  }
+}
+%end
+
 %ctor {
   rebind_symbols(
       (struct rebinding[]){
@@ -229,11 +216,19 @@ static void *hook_swift_unknownObjectWeakLoadStrong(void *ref) {
     tweakBundle = [NSBundle
         bundleWithPath:ROOT_PATH_NS(@"/Library/Application Support/TwitchAdBlock.bundle")];
   tweakDefaults = [[NSUserDefaults alloc] initWithSuiteName:@"com.level3tjg.twitchadblock"];
+  
   if (![tweakDefaults objectForKey:@"TWAdBlockEnabled"])
     [tweakDefaults setBool:YES forKey:@"TWAdBlockEnabled"];
   if (![tweakDefaults objectForKey:@"TWAdBlockProxyEnabled"])
     [tweakDefaults setBool:NO forKey:@"TWAdBlockProxyEnabled"];
   if (![tweakDefaults objectForKey:@"TWAdBlockCustomProxyEnabled"])
     [tweakDefaults setBool:NO forKey:@"TWAdBlockCustomProxyEnabled"];
+  
+  // VOD Unlocker defaults
+  if (![tweakDefaults objectForKey:@"TWAdBlockVODUnlockEnabled"])
+    [tweakDefaults setBool:YES forKey:@"TWAdBlockVODUnlockEnabled"];
+  if (![tweakDefaults objectForKey:@"TWAdBlockRestrictionRemoverEnabled"])
+    [tweakDefaults setBool:YES forKey:@"TWAdBlockRestrictionRemoverEnabled"];
+
   assetResourceLoaderDelegate = [[TWAdBlockAssetResourceLoaderDelegate alloc] init];
 }

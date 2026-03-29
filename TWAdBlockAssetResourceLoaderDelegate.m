@@ -1,4 +1,5 @@
 #import "TWAdBlockAssetResourceLoaderDelegate.h"
+#import "TWAdBlockVODUnlocker.h"
 
 extern NSUserDefaults *tweakDefaults;
 
@@ -6,20 +7,52 @@ extern NSUserDefaults *tweakDefaults;
 - (BOOL)handleLoadingRequest:(AVAssetResourceLoadingRequest *)loadingRequest {
   NSURL *URL = loadingRequest.request.URL;
   if (![URL.scheme isEqualToString:@"twab"]) return NO;
+
   AVAssetResourceLoadingDataRequest *dataRequest = loadingRequest.dataRequest;
   NSURLComponents *components = [NSURLComponents componentsWithURL:URL resolvingAgainstBaseURL:YES];
   components.scheme = @"https";
+
   NSMutableURLRequest *request = loadingRequest.request.mutableCopy;
   request.URL = components.URL;
+
+  BOOL isVOD = [request.URL.path containsString:@"/vod/"];
+  BOOL vodUnlockEnabled = [tweakDefaults boolForKey:@"TWAdBlockVODUnlockEnabled"];
+
   NSString *proxy = [tweakDefaults boolForKey:@"TWAdBlockCustomProxyEnabled"]
                         ? [tweakDefaults stringForKey:@"TWAdBlockProxy"]
                         : PROXY_ADDR;
+
   NSURLSession *session = [[NSURLSession alloc] twab_proxySessionWithAddress:proxy];
+
   [[session dataTaskWithRequest:request
               completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
                 if (error) return [loadingRequest finishLoadingWithError:error];
+
+                NSData *finalData = data;
+
+                if (isVOD && vodUnlockEnabled) {
+                    TWAdBlockVODUnlocker *unlocker = [TWAdBlockVODUnlocker sharedInstance];
+                    if ([unlocker isManifestRestricted:data]) {
+                        // Extract vodID from URL
+                        NSString *vodID = [[request.URL.lastPathComponent stringByDeletingPathExtension] stringByReplacingOccurrencesOfString:@"v2/" withString:@""];
+                        vodID = [vodID stringByReplacingOccurrencesOfString:@"v3/" withString:@""];
+
+                        dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+                        [unlocker fetchVODMetadata:vodID completion:^(NSDictionary *metadata, NSError *gqlError) {
+                            if (metadata && !gqlError) {
+                                NSString *fakeManifest = [unlocker reconstructManifest:metadata forVodID:vodID];
+                                if (fakeManifest) {
+                                    finalData = [fakeManifest dataUsingEncoding:NSUTF8StringEncoding];
+                                }
+                            }
+                            dispatch_semaphore_signal(sem);
+                        }];
+                        dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
+                    }
+                }
+
                 loadingRequest.contentInformationRequest.contentType = AVFileTypeMPEG4;
-                [dataRequest respondWithData:data];
+                [dataRequest respondWithData:finalData];
                 [loadingRequest finishLoading];
               }] resume];
   return YES;

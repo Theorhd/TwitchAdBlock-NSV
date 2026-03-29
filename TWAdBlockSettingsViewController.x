@@ -59,7 +59,7 @@ extern NSUserDefaults *tweakDefaults;
 }
 %new
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
-  return self.adblockEnabled ? 3 : 2;
+  return self.adblockEnabled ? 4 : 3;
 }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
   switch (section) {
@@ -67,6 +67,8 @@ extern NSUserDefaults *tweakDefaults;
       return 1;
     case 1:
       return self.adblockEnabled ? self.proxyEnabled ? self.customProxyEnabled ? 3 : 2 : 1 : 0;
+    case 2:
+      return 2;
     default:
       return 0;
   }
@@ -124,6 +126,33 @@ extern NSUserDefaults *tweakDefaults;
           textField.delegate = self;
           return cell;
       }
+    case 2:
+      switch (indexPath.row) {
+        case 0:
+          cell = [[objc_getClass("_TtC6Twitch27SettingsSwitchTableViewCell") alloc]
+                initWithStyle:UITableViewCellStyleDefault
+              reuseIdentifier:@"VODUnlockSwitchCell"];
+          [(_TtC6Twitch27SettingsSwitchTableViewCell *)cell
+                   configureWithTitle:LOC(@"settings.vod_unlock.title", @"Unlock VODs")
+                             subtitle:nil
+                            isEnabled:YES
+                                 isOn:[tweakDefaults boolForKey:@"TWAdBlockVODUnlockEnabled"]
+              accessibilityIdentifier:@"VODUnlockSwitchCell"];
+          [(_TtC6Twitch27SettingsSwitchTableViewCell *)cell setDelegate:self];
+          return cell;
+        case 1:
+          cell = [[objc_getClass("_TtC6Twitch27SettingsSwitchTableViewCell") alloc]
+                initWithStyle:UITableViewCellStyleDefault
+              reuseIdentifier:@"RestrictionRemoverSwitchCell"];
+          [(_TtC6Twitch27SettingsSwitchTableViewCell *)cell
+                   configureWithTitle:LOC(@"settings.restriction_remover.title", @"Remove Restriction Badges")
+                             subtitle:nil
+                            isEnabled:YES
+                                 isOn:[tweakDefaults boolForKey:@"TWAdBlockRestrictionRemoverEnabled"]
+              accessibilityIdentifier:@"RestrictionRemoverSwitchCell"];
+          [(_TtC6Twitch27SettingsSwitchTableViewCell *)cell setDelegate:self];
+          return cell;
+      }
     default:
       return nil;
   }
@@ -139,7 +168,10 @@ extern NSUserDefaults *tweakDefaults;
       title = LOC(@"settings.proxy.footer",
                   @"Proxy specific requests through a proxy server based in an ad-free country");
       if (self.adblockEnabled) break;
-    case 2: {
+    case 2:
+      title = LOC(@"settings.vod_unlock.footer", @"Unlock subscriber-only VODs and remove restriction badges");
+      break;
+    case 3: {
       _TtC6Twitch12VersionLabel *versionLabel =
           [[objc_getClass("_TtC6Twitch12VersionLabel") alloc] initWithFrame:CGRectZero];
       versionLabel.text = @"TwitchAdBlock v" PACKAGE_VERSION;
@@ -191,6 +223,10 @@ extern NSUserDefaults *tweakDefaults;
     else
       [self.tableView deleteRowsAtIndexPaths:indexPaths
                             withRowAnimation:UITableViewRowAnimationFade];
+  } else if ([sender.accessibilityIdentifier isEqualToString:@"VODUnlockSwitchCell"]) {
+    [tweakDefaults setBool:sender.isOn forKey:@"TWAdBlockVODUnlockEnabled"];
+  } else if ([sender.accessibilityIdentifier isEqualToString:@"RestrictionRemoverSwitchCell"]) {
+    [tweakDefaults setBool:sender.isOn forKey:@"TWAdBlockRestrictionRemoverEnabled"];
   }
 
   [tweakDefaults synchronize];
