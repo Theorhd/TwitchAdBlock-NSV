@@ -146,12 +146,13 @@
     for (NSString *resKey in keys) {
         NSString *streamUrl;
         if ([broadcastType isEqualToString:@"highlight"]) {
-            streamUrl = [NSString stringWithFormat:@"https://%@/%@/%@/highlight-%@.m3u8", domain, vodSpecialID, resKey, vodID];
+            streamUrl = [NSString stringWithFormat:@"twab://%@/%@/%@/highlight-%@.m3u8", domain, vodSpecialID, resKey, vodID];
         } else if ([broadcastType isEqualToString:@"upload"] && daysDiff > 7) {
-            streamUrl = [NSString stringWithFormat:@"https://%@/%@/%@/%@/%@/index-dvr.m3u8", domain, owner[@"login"], vodID, vodSpecialID, resKey];
+            streamUrl = [NSString stringWithFormat:@"twab://%@/%@/%@/%@/%@/index-dvr.m3u8", domain, owner[@"login"], vodID, vodSpecialID, resKey];
         } else {
-            streamUrl = [NSString stringWithFormat:@"https://%@/%@/%@/index-dvr.m3u8", domain, vodSpecialID, resKey];
+            streamUrl = [NSString stringWithFormat:@"twab://%@/%@/%@/index-dvr.m3u8", domain, vodSpecialID, resKey];
         }
+
         
         NSString *quality = [resKey isEqualToString:@"chunked"] ? @"1080p" : resKey;
         NSString *enabled = [resKey isEqualToString:@"chunked"] ? @"YES" : @"NO";
