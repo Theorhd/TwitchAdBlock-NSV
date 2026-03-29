@@ -16,8 +16,6 @@
     NSURL *url = [NSURL URLWithString:@"https://gql.twitch.tv/gql"];
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
     [request setHTTPMethod:@"POST"];
-
-    // Standard Twitch Client-Id for Web/iOS
     [request setValue:@"kimne78kx3ncx6brgo4mv6wki5h1ko" forHTTPHeaderField:@"Client-Id"];
     [request setValue:@"application/json" forHTTPHeaderField:@"Accept"];
     [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
@@ -25,7 +23,6 @@
     [request setValue:@"https://www.twitch.tv/" forHTTPHeaderField:@"Referer"];
     [request setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1" forHTTPHeaderField:@"User-Agent"];
 
-    // Ensure vodID format is correct (sometimes needs 'v' prefix)
     NSString *formattedID = vodID;
     if (![vodID hasPrefix:@"v"] && [vodID rangeOfCharacterFromSet:[[NSCharacterSet decimalDigitCharacterSet] invertedSet]].location == NSNotFound) {
         formattedID = [NSString stringWithFormat:@"v%@", vodID];
@@ -35,20 +32,13 @@
         @"query": @"query($id: ID!) { video(id: $id) { broadcastType, createdAt, seekPreviewsURL, owner { login } }}",
         @"variables": @{@"id": formattedID}
     };
-
-    NSData *bodyData = [NSJSONSerialization dataWithJSONObject:body options:0 error:nil];
-    [request setHTTPBody:bodyData];
+    [request setHTTPBody:[NSJSONSerialization dataWithJSONObject:body options:0 error:nil]];
 
     [[NSURLSession.sharedSession dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-        if (error) {
-            completion(nil, error);
-            return;
-        }
-
+        if (error) { completion(nil, error); return; }
         NSError *jsonError;
         NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:&jsonError];
-        if (jsonError || !json[@"data"]) {
-            // Try again without 'v' prefix if it failed
+        if (jsonError || !json[@"data"] || [json[@"data"][@"video"] isEqual:[NSNull null]]) {
             if ([formattedID hasPrefix:@"v"]) {
                 [self fetchVODMetadataWithoutV:vodID completion:completion];
             } else {
@@ -60,7 +50,6 @@
     }] resume];
 }
 
-// Fallback helper
 - (void)fetchVODMetadataWithoutV:(NSString *)vodID completion:(void (^)(NSDictionary *metadata, NSError *error))completion {
     NSURL *url = [NSURL URLWithString:@"https://gql.twitch.tv/gql"];
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
@@ -68,7 +57,7 @@
     [request setValue:@"kimne78kx3ncx6brgo4mv6wki5h1ko" forHTTPHeaderField:@"Client-Id"];
     [request setValue:@"application/json" forHTTPHeaderField:@"Accept"];
     [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
-
+    
     NSDictionary *body = @{
         @"query": @"query($id: ID!) { video(id: $id) { broadcastType, createdAt, seekPreviewsURL, owner { login } }}",
         @"variables": @{@"id": vodID}
@@ -80,7 +69,6 @@
         completion(json[@"data"][@"video"], nil);
     }] resume];
 }
-
 
 - (BOOL)isManifestRestricted:(NSData *)data {
     NSString *body = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
@@ -109,7 +97,6 @@
     NSString *domain = previewURL.host;
     NSArray *pathComponents = previewURL.pathComponents;
     
-    // Find storyboards index to get vodSpecialID
     NSInteger storyboardIndex = -1;
     for (NSInteger i = 0; i < pathComponents.count; i++) {
         if ([pathComponents[i] containsString:@"storyboards"]) {
@@ -121,18 +108,15 @@
     if (storyboardIndex <= 0) return nil;
     NSString *vodSpecialID = pathComponents[storyboardIndex - 1];
     
-    NSString *servingID = [[NSUUID UUID].UUIDString stringByReplacingOccurrencesOfString:@"-" withString:@""];
-    NSMutableString *manifest = [NSMutableString stringWithFormat:@"#EXTM3U\n"
-                                 "#EXT-X-VERSION:3\n"
-                                 "#EXT-X-TWITCH-INFO:ORIGIN=\"s3\",B=\"false\",REGION=\"EU\",USER-IP=\"127.0.0.1\",SERVING-ID=\"%@\",CLUSTER=\"cloudfront_vod\",USER-COUNTRY=\"BE\",MANIFEST-CLUSTER=\"cloudfront_vod\"\n", servingID];
+    NSMutableString *manifest = [NSMutableString stringWithFormat:@"#EXTM3U\n#EXT-X-VERSION:3\n"];
     
     NSDictionary *resolutions = @{
-        @"160p30": @{@"res": @"284x160", @"fps": @30, @"bw": @638000},
-        @"360p30": @{@"res": @"640x360", @"fps": @30, @"bw": @1064000},
-        @"480p30": @{@"res": @"854x480", @"fps": @30, @"bw": @1562000},
-        @"720p60": @{@"res": @"1280x720", @"fps": @60, @"bw": @3708000},
-        @"1080p60": @{@"res": @"1920x1080", @"fps": @60, @"bw": @8254000},
-        @"chunked": @{@"res": @"1920x1080", @"fps": @60, @"bw": @8534000}
+        @"160p30": @{@"res": @"284x160", @"fps": @30, @"bw": @"638000"},
+        @"360p30": @{@"res": @"640x360", @"fps": @30, @"bw": @"1064000"},
+        @"480p30": @{@"res": @"854x480", @"fps": @30, @"bw": @"1562000"},
+        @"720p60": @{@"res": @"1280x720", @"fps": @60, @"bw": @"3708000"},
+        @"1080p60": @{@"res": @"1920x1080", @"fps": @60, @"bw": @"8254000"},
+        @"chunked": @{@"res": @"1920x1080", @"fps": @60, @"bw": @"8534000"}
     };
     
     NSArray *keys = @[@"chunked", @"1080p60", @"720p60", @"480p30", @"360p30", @"160p30"];
@@ -167,11 +151,34 @@
 - (NSData *)patchPlaylistData:(NSData *)data {
     NSString *body = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
     if (!body) return data;
-    if ([body containsString:@"-unmuted"]) {
-        NSString *patchedBody = [body stringByReplacingOccurrencesOfString:@"-unmuted" withString:@"-muted"];
-        return [patchedBody dataUsingEncoding:NSUTF8StringEncoding];
+    
+    NSString *patchedBody = body;
+    
+    // 1. Patch unmuted -> muted
+    if ([patchedBody containsString:@"-unmuted"]) {
+        patchedBody = [patchedBody stringByReplacingOccurrencesOfString:@"-unmuted" withString:@"-muted"];
     }
-    return data;
+    
+    // 2. Tunneling: Force segments to pass through our resource loader
+    // Replace https://[domain]/... with twab://[domain]/...
+    // Only for known Twitch video domains
+    NSArray *domains = @[@"cloudfront.net", @"ttvnw.net", @"akamaized.net"];
+    for (NSString *domain in domains) {
+        NSString *search = [NSString stringWithFormat:@"https://%@.", domain];
+        NSString *replace = [NSString stringWithFormat:@"twab://%@.", domain];
+        if ([patchedBody containsString:search]) {
+            patchedBody = [patchedBody stringByReplacingOccurrencesOfString:search withString:replace];
+        }
+        
+        // Also handle https://domain/ (without dot)
+        search = [NSString stringWithFormat:@"https://%@", domain];
+        replace = [NSString stringWithFormat:@"twab://%@", domain];
+        if ([patchedBody containsString:search]) {
+            patchedBody = [patchedBody stringByReplacingOccurrencesOfString:search withString:replace];
+        }
+    }
+    
+    return [patchedBody dataUsingEncoding:NSUTF8StringEncoding];
 }
 
 @end

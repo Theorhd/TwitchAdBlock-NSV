@@ -16,11 +16,17 @@ extern NSUserDefaults *tweakDefaults;
   request.URL = components.URL;
 
   NSString *path = request.URL.path;
+  NSString *host = request.URL.host;
+  
   BOOL isMasterManifest = [path containsString:@"/vod/"] && ![path containsString:@"index-dvr"];
   BOOL isPlaylist = [path.pathExtension isEqualToString:@"m3u8"];
-  BOOL isCloudfront = [request.URL.host containsString:@"cloudfront.net"] || 
-                      [request.URL.host containsString:@"ttvnw.net"] ||
-                      [request.URL.host containsString:@"akamaized.net"];
+  
+  // Broad domain check to ensure all Twitch video domains are covered
+  BOOL isTwitchVideoDomain = [host containsString:@"cloudfront.net"] || 
+                             [host containsString:@"ttvnw.net"] ||
+                             [host containsString:@"akamaized.net"] ||
+                             [host containsString:@"twitch.tv"];
+                             
   BOOL vodUnlockEnabled = [tweakDefaults boolForKey:@"TWAdBlockVODUnlockEnabled"];
   BOOL proxyEnabled = [tweakDefaults boolForKey:@"TWAdBlockProxyEnabled"];
 
@@ -45,7 +51,6 @@ extern NSUserDefaults *tweakDefaults;
                 TWAdBlockVODUnlocker *unlocker = [TWAdBlockVODUnlocker sharedInstance];
 
                 if (isMasterManifest && vodUnlockEnabled && (httpResponse.statusCode == 403 || [unlocker isManifestRestricted:data])) {
-                    // Extract VOD ID: /vod/v2/123456.m3u8 -> 123456
                     NSString *vodID = [request.URL.lastPathComponent stringByDeletingPathExtension];
                     
                     [unlocker fetchVODMetadata:vodID completion:^(NSDictionary *metadata, NSError *gqlError) {
@@ -57,7 +62,8 @@ extern NSUserDefaults *tweakDefaults;
                             }
                         }
                         
-                        loadingRequest.contentInformationRequest.contentType = @"application/vnd.apple.mpegurl";
+                        // Use Apple UTIs instead of MIME types
+                        loadingRequest.contentInformationRequest.contentType = @"com.apple.mpegurl";
                         loadingRequest.contentInformationRequest.contentLength = finalData.length;
                         loadingRequest.contentInformationRequest.byteRangeAccessSupported = YES;
                         [dataRequest respondWithData:finalData];
@@ -65,24 +71,28 @@ extern NSUserDefaults *tweakDefaults;
                     }];
                 } else {
                     NSData *finalData = data;
-                    if (isPlaylist && isCloudfront) {
+                    if (isPlaylist && isTwitchVideoDomain) {
                         finalData = [unlocker patchPlaylistData:data];
                     }
                     
-                    NSString *contentType;
-                    if (isPlaylist) {
-                        contentType = @"application/vnd.apple.mpegurl";
-                    } else if ([path.pathExtension isEqualToString:@"mp4"]) {
-                        contentType = @"video/mp4";
-                    } else {
-                        contentType = @"video/mp2t"; // Default for .ts
-                    }
+                    // Correct UTIs for HLS segments and playlists
+                    NSString *uti = isPlaylist ? @"com.apple.mpegurl" : ([path.pathExtension isEqualToString:@"mp4"] ? @"public.mpeg-4" : @"public.mpeg-ts");
                     
-                    loadingRequest.contentInformationRequest.contentType = contentType;
+                    loadingRequest.contentInformationRequest.contentType = uti;
                     loadingRequest.contentInformationRequest.contentLength = finalData.length;
                     loadingRequest.contentInformationRequest.byteRangeAccessSupported = YES;
                     
-                    [dataRequest respondWithData:finalData];
+                    if (loadingRequest.dataRequest.requestedOffset > 0) {
+                        long long offset = loadingRequest.dataRequest.requestedOffset;
+                        long long length = loadingRequest.dataRequest.requestedLength;
+                        if (offset < finalData.length) {
+                            NSData *subData = [finalData subdataWithRange:NSMakeRange((NSUInteger)offset, (NSUInteger)MIN(length, (long long)finalData.length - offset))];
+                            [dataRequest respondWithData:subData];
+                        }
+                    } else {
+                        [dataRequest respondWithData:finalData];
+                    }
+                    
                     [loadingRequest finishLoading];
                 }
               }] resume];
