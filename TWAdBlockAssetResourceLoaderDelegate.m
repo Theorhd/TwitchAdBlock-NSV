@@ -51,12 +51,12 @@ extern NSUserDefaults *tweakDefaults;
                             }
                         }
                         
-                        loadingRequest.contentInformationRequest.contentType = AVFileTypeMPEG4;
+                        loadingRequest.contentInformationRequest.contentType = @"com.apple.mpegurl";
                         [dataRequest respondWithData:finalData];
                         [loadingRequest finishLoading];
                     }];
                 } else {
-                    loadingRequest.contentInformationRequest.contentType = AVFileTypeMPEG4;
+                    loadingRequest.contentInformationRequest.contentType = @"com.apple.mpegurl";
                     [dataRequest respondWithData:data];
                     [loadingRequest finishLoading];
                 }

@@ -76,6 +76,7 @@ TWAdBlockAssetResourceLoaderDelegate *assetResourceLoaderDelegate;
 - (instancetype)init {
   if ((self = %orig)) {
     [self addObserver:self forKeyPath:@"status" options:NSKeyValueObservingOptionNew context:NULL];
+    [self addObserver:self forKeyPath:@"rate" options:NSKeyValueObservingOptionNew context:NULL];
   }
   return self;
 }
@@ -84,9 +85,16 @@ TWAdBlockAssetResourceLoaderDelegate *assetResourceLoaderDelegate;
                       ofObject:(id)object
                         change:(NSDictionary<NSKeyValueChangeKey, id> *)change
                        context:(void *)context {
-  if ([keyPath isEqualToString:@"status"] &&
-      [change[NSKeyValueChangeNewKey] integerValue] == AVPlayerStatusReadyToPlay)
-    [self play];
+  if ([keyPath isEqualToString:@"status"]) {
+      if ([change[NSKeyValueChangeNewKey] integerValue] == AVPlayerStatusReadyToPlay) {
+          [self play];
+      }
+  } else if ([keyPath isEqualToString:@"rate"]) {
+      if ([change[NSKeyValueChangeNewKey] floatValue] == 0.0 && [self status] == AVPlayerStatusReadyToPlay) {
+          // If player is paused but ready, and it's a VOD, try to force play
+          [self play];
+      }
+  }
 }
 %end
 
