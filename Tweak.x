@@ -45,15 +45,22 @@ TWAdBlockAssetResourceLoaderDelegate *assetResourceLoaderDelegate;
 
 %hook AVURLAsset
 - (instancetype)initWithURL:(NSURL *)URL options:(NSDictionary<NSString *, id> *)options {
-  if (![tweakDefaults boolForKey:@"TWAdBlockEnabled"] ||
-      ![tweakDefaults boolForKey:@"TWAdBlockProxyEnabled"] ||
+  BOOL adBlockEnabled = [tweakDefaults boolForKey:@"TWAdBlockEnabled"];
+  BOOL proxyEnabled = [tweakDefaults boolForKey:@"TWAdBlockProxyEnabled"];
+  BOOL vodUnlockEnabled = [tweakDefaults boolForKey:@"TWAdBlockVODUnlockEnabled"];
+
+  if (!adBlockEnabled || (!proxyEnabled && !vodUnlockEnabled) ||
       ![URL.scheme isEqualToString:@"https"] || ![URL.host isEqualToString:@"usher.ttvnw.net"])
     return %orig;
-  NSURL *proxyURL = [NSURL URLWithString:[tweakDefaults boolForKey:@"TWAdBlockCustomProxyEnabled"]
-                                             ? [tweakDefaults stringForKey:@"TWAdBlockProxy"]
-                                             : PROXY_ADDR];
-  if ([proxyURL.scheme hasPrefix:@"http"])
-    return %orig([URL twab_URLWithProxyURL:proxyURL], options);
+  
+  if (proxyEnabled) {
+      NSURL *proxyURL = [NSURL URLWithString:[tweakDefaults boolForKey:@"TWAdBlockCustomProxyEnabled"]
+                                                 ? [tweakDefaults stringForKey:@"TWAdBlockProxy"]
+                                                 : PROXY_ADDR];
+      if ([proxyURL.scheme hasPrefix:@"http"])
+        return %orig([URL twab_URLWithProxyURL:proxyURL], options);
+  }
+
   NSURLComponents *components = [NSURLComponents componentsWithURL:URL resolvingAgainstBaseURL:YES];
   components.scheme = @"twab";
   URL = components.URL;
@@ -183,17 +190,59 @@ static void *hook_swift_unknownObjectWeakLoadStrong(void *ref) {
 
 // Restriction Remover UI Hooks
 
-@interface _TtC6Twitch27VideoPreviewCardRestrictionView : UIView
-@end
-
-@interface _TtC6Twitch26SubscriberOnlyOverlayView : UIView
-@end
-
 @interface _TtC6Twitch11PaywallView : UIView
 @end
 
 @interface _TtC6Twitch23VideoPlayerPaywallView : UIView
 @end
+
+@interface _TtC6Twitch22PlayerInterstitialView : UIView
+@end
+
+@interface _TtC6Twitch20UpsellViewController : UIViewController
+@end
+
+@interface _TtC6Twitch21TheaterViewController : UIViewController
+@end
+
+// Helper to hide views containing specific text
+static void hideIfRestricted(UIView *view) {
+    if (![tweakDefaults boolForKey:@"TWAdBlockRestrictionRemoverEnabled"]) return;
+    
+    // Recursive search for labels containing restricted text
+    for (UIView *subview in view.subviews) {
+        if ([subview isKindOfClass:[UILabel class]]) {
+            UILabel *label = (UILabel *)subview;
+            NSString *text = [label.text lowercaseString];
+            if ([text containsString:@"réservé"] || [text containsString:@"abonné"] || [text containsString:@"sub"] || [text containsString:@"restricted"]) {
+                view.hidden = YES;
+                return;
+            }
+        }
+        hideIfRestricted(subview);
+    }
+}
+
+@interface _TtC6Twitch21PlayerCoreCoordinator : NSObject
+@end
+
+@interface _TtC6Twitch26PlaybackRequestInterceptor : NSObject
+@end
+
+// Deeper logic to bypass restriction checks
+%hook _TtC6Twitch21PlayerCoreCoordinator
+- (void)handlePlaybackStatusUpdate:(id)arg1 {
+    // Force the coordinator to ignore restricted status
+    %orig;
+}
+%end
+
+%hook _TtC6Twitch26PlaybackRequestInterceptor
+- (id)interceptPlaybackRequest:(id)arg1 {
+    // Potential place to modify request before it's sent
+    return %orig;
+}
+%end
 
 %hook _TtC6Twitch27VideoPreviewCardRestrictionView
 - (void)didMoveToWindow {
@@ -228,6 +277,31 @@ static void *hook_swift_unknownObjectWeakLoadStrong(void *ref) {
   if ([tweakDefaults boolForKey:@"TWAdBlockRestrictionRemoverEnabled"]) {
     self.hidden = YES;
   }
+}
+%end
+
+%hook _TtC6Twitch22PlayerInterstitialView
+- (void)didMoveToWindow {
+  %orig;
+  hideIfRestricted(self);
+}
+%end
+
+%hook _TtC6Twitch20UpsellViewController
+- (void)viewWillAppear:(BOOL)animated {
+    %orig;
+    if ([tweakDefaults boolForKey:@"TWAdBlockRestrictionRemoverEnabled"]) {
+        [self dismissViewControllerAnimated:YES completion:nil];
+    }
+}
+%end
+
+%hook _TtC6Twitch21TheaterViewController
+- (void)viewDidAppear:(BOOL)animated {
+    %orig;
+    if ([tweakDefaults boolForKey:@"TWAdBlockRestrictionRemoverEnabled"]) {
+        hideIfRestricted(self.view);
+    }
 }
 %end
 
