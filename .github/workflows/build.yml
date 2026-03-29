@@ -11,37 +11,93 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
+
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Install Swift
-        uses: fwal/setup-swift@v1
+      - name: Get package info
+        id: package_info
+        run: |
+          version=$(cat Makefile | grep "PACKAGE_VERSION =" | cut -d' ' -f3)
+          if [ -z $version ]; then
+            version=$(cat control | grep "Version:" | cut -d' ' -f2)
+          fi
+          echo "id=$(cat control | grep "Package:" | cut -d' ' -f2)" >> $GITHUB_OUTPUT
+          echo "version=$version" >> $GITHUB_OUTPUT
+
+      - name: Install dependencies
+        if: ${{ inputs.create_release }}
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential checkinstall git autoconf automake libtool-bin rsync llvm xmlstarlet
+          curl -L https://github.com/libimobiledevice/libplist/releases/download/2.4.0/libplist-2.4.0.tar.bz2 | bzip2 -d | tar -x
+          cd libplist*
+          ./configure
+          sudo make install
+          sudo ldconfig
+
+      - name: Download STS IPA
+        if: ${{ inputs.create_release }}
+        run: |
+          curl -Lo "${{ github.workspace }}/STS.ipa" "https://nextcloud.level3tjg.me/s/b2WcDdDMN3ZXkYf/download/tv.twitch_19.4.ipa"
+          zip -T "${{ github.workspace }}/STS.ipa"
+
+      - name: Setup theos
+        uses: level3tjg/theos-action@main
         with:
-          swift-version: "5.10"
+          cache: true
+          cache-dir-theos: ${{ github.workspace }}/theos
+          cache-dir-sdks: ${{ github.workspace }}/theos/sdks
 
-      - name: Install Theos
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libfl-dev zstd libssl-dev
-          git clone --recursive https://github.com/theos/theos.git ~/theos
-          echo "THEOS=~/theos" >> $GITHUB_ENV
-          echo "~/theos/bin" >> $GITHUB_PATH
+      - name: Checkout theos-jailed
+        if: ${{ inputs.create_release }}
+        uses: actions/checkout@v4
+        with:
+          repository: level3tjg/theos-jailed
+          path: theos-jailed
+          submodules: recursive
 
-      - name: Setup SDK
+      - name: Install theos-jailed
+        if: ${{ inputs.create_release }}
         run: |
-          git clone https://github.com/theos/sdks.git ~/theos/sdks
+          ./theos-jailed/install
+          cd libplist*
+          sudo make uninstall
 
-      - name: Build Package (STS Only)
-        run: |
-          export THEOS_PACKAGE_SCHEME=rootless
-          make package FINALPACKAGE=1 STS=1
-          
-      - name: Upload Artifacts
+      - name: Build rootless deb
+        run: make package
+        env:
+          FINALPACKAGE: ${{ inputs.create_release }}
+          THEOS_PACKAGE_SCHEME: rootless
+
+      - name: Build rootful deb
+        run: make clean package
+        env:
+          FINALPACKAGE: ${{ inputs.create_release }}
+
+      - name: Build STS IPA
+        if: ${{ inputs.create_release }}
+        run: make package
+        env:
+          FINALPACKAGE: 1
+          SIDELOADED: 1
+          IPA: ${{ github.workspace }}/STS.ipa
+          APP_VERSION: "19.4"
+          STS: 1
+
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: TwitchAdBlock-STS-19.4
-          path: packages/*.deb
+          name: ${{ steps.package_info.outputs.id }}_${{ steps.package_info.outputs.version }}
+          path: packages/*
+
+      - name: Create release
+        if: ${{ inputs.create_release }}
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: packages/*
+          tag_name: v19.4-${{ steps.package_info.outputs.version }}
