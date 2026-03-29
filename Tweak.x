@@ -202,9 +202,6 @@ static void *hook_swift_unknownObjectWeakLoadStrong(void *ref) {
 @interface _TtC6Twitch20UpsellViewController : UIViewController
 @end
 
-@interface _TtC6Twitch21TheaterViewController : UIViewController
-@end
-
 // Helper to hide views containing specific text
 static void hideIfRestricted(UIView *view) {
     if (![tweakDefaults boolForKey:@"TWAdBlockRestrictionRemoverEnabled"]) return;
@@ -248,7 +245,7 @@ static void hideIfRestricted(UIView *view) {
 - (void)didMoveToWindow {
   %orig;
   if ([tweakDefaults boolForKey:@"TWAdBlockRestrictionRemoverEnabled"]) {
-    self.hidden = YES;
+    ((UIView *)self).hidden = YES;
   }
 }
 %end
@@ -257,7 +254,7 @@ static void hideIfRestricted(UIView *view) {
 - (void)didMoveToWindow {
   %orig;
   if ([tweakDefaults boolForKey:@"TWAdBlockRestrictionRemoverEnabled"]) {
-    self.hidden = YES;
+    ((UIView *)self).hidden = YES;
   }
 }
 %end
@@ -266,7 +263,7 @@ static void hideIfRestricted(UIView *view) {
 - (void)didMoveToWindow {
   %orig;
   if ([tweakDefaults boolForKey:@"TWAdBlockRestrictionRemoverEnabled"]) {
-    self.hidden = YES;
+    ((UIView *)self).hidden = YES;
   }
 }
 %end
@@ -275,7 +272,7 @@ static void hideIfRestricted(UIView *view) {
 - (void)didMoveToWindow {
   %orig;
   if ([tweakDefaults boolForKey:@"TWAdBlockRestrictionRemoverEnabled"]) {
-    self.hidden = YES;
+    ((UIView *)self).hidden = YES;
   }
 }
 %end
