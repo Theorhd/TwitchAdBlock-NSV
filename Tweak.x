@@ -183,6 +183,12 @@ static void *hook_swift_unknownObjectWeakLoadStrong(void *ref) {
 
 // Restriction Remover UI Hooks
 
+@interface _TtC6Twitch27VideoPreviewCardRestrictionView : UIView
+@end
+
+@interface _TtC6Twitch26SubscriberOnlyOverlayView : UIView
+@end
+
 %hook _TtC6Twitch27VideoPreviewCardRestrictionView
 - (void)didMoveToWindow {
   %orig;

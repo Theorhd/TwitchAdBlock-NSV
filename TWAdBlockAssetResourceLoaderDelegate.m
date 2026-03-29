@@ -28,7 +28,7 @@ extern NSUserDefaults *tweakDefaults;
               completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
                 if (error) return [loadingRequest finishLoadingWithError:error];
 
-                NSData *finalData = data;
+                __block NSData *finalData = data;
 
                 if (isVOD && vodUnlockEnabled) {
                     TWAdBlockVODUnlocker *unlocker = [TWAdBlockVODUnlocker sharedInstance];
