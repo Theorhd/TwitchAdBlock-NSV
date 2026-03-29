@@ -69,7 +69,15 @@ extern NSUserDefaults *tweakDefaults;
                         finalData = [unlocker patchPlaylistData:data];
                     }
                     
-                    NSString *contentType = isPlaylist ? @"application/vnd.apple.mpegurl" : @"video/mp2t";
+                    NSString *contentType;
+                    if (isPlaylist) {
+                        contentType = @"application/vnd.apple.mpegurl";
+                    } else if ([path.pathExtension isEqualToString:@"mp4"]) {
+                        contentType = @"video/mp4";
+                    } else {
+                        contentType = @"video/mp2t"; // Default for .ts
+                    }
+                    
                     loadingRequest.contentInformationRequest.contentType = contentType;
                     loadingRequest.contentInformationRequest.contentLength = finalData.length;
                     loadingRequest.contentInformationRequest.byteRangeAccessSupported = YES;

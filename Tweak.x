@@ -314,6 +314,17 @@ static void hideIfRestricted(UIView *view) {
 }
 %end
 
+// Low-level hook using fishhook for PlaybackAccessTokenParams
+// Based on Ghidra dump: _$s13TwitchGraphQL25PlaybackAccessTokenParamsV...
+
+static void (*orig_PlaybackAccessTokenParams_init)(void *disableHTTPS, void *hasAdblock, void *platform_p, void *platform_m, void *playerBackend_p, void *playerBackend_m, void *playerType_p, void *playerType_m);
+
+static void hook_PlaybackAccessTokenParams_init(void *disableHTTPS, void *hasAdblock, void *platform_p, void *platform_m, void *playerBackend_p, void *playerBackend_m, void *playerType_p, void *playerType_m) {
+    // Force hasAdblock to 2 (some(false) in Swift Nullable<Bool>)
+    // Force platform to "web" could be done here if we knew the Swift String layout for "web"
+    orig_PlaybackAccessTokenParams_init(disableHTTPS, (void *)2, platform_p, platform_m, playerBackend_p, playerBackend_m, playerType_p, playerType_m);
+}
+
 %ctor {
   rebind_symbols(
       (struct rebinding[]){
@@ -321,8 +332,10 @@ static void hideIfRestricted(UIView *view) {
            (void **)&orig_swift_unknownObjectWeakAssign},
           {"swift_unknownObjectWeakLoadStrong", (void *)hook_swift_unknownObjectWeakLoadStrong,
            (void **)&orig_swift_unknownObjectWeakLoadStrong},
+          {"_$s13TwitchGraphQL25PlaybackAccessTokenParamsV12disableHTTPS10hasAdblock8platform13playerBackend0M4TypeAC9ApolloAPI0B10QLNullableOySbG_ALSSAKySSGSStcfC", 
+           (void *)hook_PlaybackAccessTokenParams_init, (void **)&orig_PlaybackAccessTokenParams_init},
       },
-      2);
+      3);
   tweakBundle = [NSBundle bundleWithPath:[NSBundle.mainBundle pathForResource:@"TwitchAdBlock"
                                                                        ofType:@"bundle"]];
   if (!tweakBundle)
