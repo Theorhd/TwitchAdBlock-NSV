@@ -315,9 +315,9 @@ static void hideIfRestricted(UIView *view) {
 - (void)layoutSubviews {
     %orig;
     if ([tweakDefaults boolForKey:@"TWAdBlockRestrictionRemoverEnabled"]) {
-        UIView *errorView = [self valueForKey:@"requestErrorOverlayView"];
+        UIView *errorView = [(id)self valueForKey:@"requestErrorOverlayView"];
         if (errorView && [errorView isKindOfClass:[UIView class]]) {
-            errorView.hidden = YES;
+            ((UIView *)errorView).hidden = YES;
         }
     }
 }
