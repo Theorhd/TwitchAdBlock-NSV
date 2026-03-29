@@ -18,13 +18,22 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Setup Theos
-        uses: akusio/setup-theos-action@master
-
-      - name: Setup Swift
-        uses: slashmili/setup-swift@v2
+      - name: Install Swift
+        uses: fwal/setup-swift@v1
         with:
           swift-version: "5.10"
+
+      - name: Install Theos
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfl-dev zstd libssl-dev
+          git clone --recursive https://github.com/theos/theos.git ~/theos
+          echo "THEOS=~/theos" >> $GITHUB_ENV
+          echo "~/theos/bin" >> $GITHUB_PATH
+
+      - name: Setup SDK
+        run: |
+          git clone https://github.com/theos/sdks.git ~/theos/sdks
 
       - name: Build Package (STS Only)
         run: |
