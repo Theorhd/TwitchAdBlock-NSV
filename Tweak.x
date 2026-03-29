@@ -240,6 +240,19 @@ static void hideIfRestricted(UIView *view) {
 }
 %end
 
+@interface _TtC9TwitchKit5Video : NSObject
+- (BOOL)currentUserIsRestricted;
+@end
+
+%hook _TtC9TwitchKit5Video
+- (BOOL)currentUserIsRestricted {
+    if ([tweakDefaults boolForKey:@"TWAdBlockVODUnlockEnabled"]) {
+        return NO;
+    }
+    return %orig;
+}
+%end
+
 %hook _TtC6Twitch30TheaterRequestErrorOverlayView
 - (void)didMoveToWindow {
     %orig;
