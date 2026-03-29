@@ -91,7 +91,6 @@ TWAdBlockAssetResourceLoaderDelegate *assetResourceLoaderDelegate;
       }
   } else if ([keyPath isEqualToString:@"rate"]) {
       if ([change[NSKeyValueChangeNewKey] floatValue] == 0.0 && [self status] == AVPlayerStatusReadyToPlay) {
-          // If player is paused but ready, and it's a VOD, try to force play
           [self play];
       }
   }
@@ -215,16 +214,16 @@ static void hideIfRestricted(UIView *view) {
     if (!view || ![tweakDefaults boolForKey:@"TWAdBlockRestrictionRemoverEnabled"]) return;
     
     @try {
-        for (UIView *subview in view.subviews) {
-            if ([subview isKindOfClass:[UILabel class]]) {
-                UILabel *label = (UILabel *)subview;
-                NSString *text = [label.text lowercaseString];
-                if (text && ([text containsString:@"réservé"] || [text containsString:@"abonné"] || [text containsString:@"restricted"])) {
-                    view.hidden = YES;
-                    return;
-                }
+        if ([view isKindOfClass:[UILabel class]]) {
+            UILabel *label = (UILabel *)view;
+            NSString *text = [label.text lowercaseString];
+            if (text && ([text containsString:@"réservé"] || [text containsString:@"abonné"] || [text containsString:@"restricted"] || [text containsString:@"sub"])) {
+                view.superview.hidden = YES;
+                return;
             }
-            if (subview.subviews.count > 0) hideIfRestricted(subview);
+        }
+        for (UIView *subview in view.subviews) {
+            hideIfRestricted(subview);
         }
     } @catch (NSException *e) {}
 }
@@ -245,7 +244,14 @@ static void hideIfRestricted(UIView *view) {
 - (void)didMoveToWindow {
     %orig;
     if ([tweakDefaults boolForKey:@"TWAdBlockRestrictionRemoverEnabled"]) {
-        @try { ((UIView *)self).hidden = YES; } @catch (NSException *e) {}
+        @try { self.hidden = YES; } @catch (NSException *e) {}
+    }
+}
+- (void)setHidden:(BOOL)hidden {
+    if ([tweakDefaults boolForKey:@"TWAdBlockRestrictionRemoverEnabled"]) {
+        %orig(YES);
+    } else {
+        %orig;
     }
 }
 %end
@@ -266,7 +272,7 @@ static void hideIfRestricted(UIView *view) {
 - (void)didMoveToWindow {
     %orig;
     if ([tweakDefaults boolForKey:@"TWAdBlockRestrictionRemoverEnabled"]) {
-        @try { ((UIView *)self).hidden = YES; } @catch (NSException *e) {}
+        @try { self.hidden = YES; } @catch (NSException *e) {}
     }
 }
 %end
@@ -299,6 +305,12 @@ static void hideIfRestricted(UIView *view) {
 %hook _TtC6Twitch11TheaterView
 - (void)layoutSubviews {
     %orig;
+    if ([tweakDefaults boolForKey:@"TWAdBlockRestrictionRemoverEnabled"]) {
+        @try {
+            UIView *errorOverlay = [(id)self valueForKey:@"requestErrorOverlayView"];
+            if (errorOverlay) errorOverlay.hidden = YES;
+        } @catch (NSException *e) {}
+    }
 }
 %end
 

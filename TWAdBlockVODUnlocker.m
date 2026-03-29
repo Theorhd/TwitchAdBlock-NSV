@@ -16,13 +16,26 @@
     NSURL *url = [NSURL URLWithString:@"https://gql.twitch.tv/gql"];
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
     [request setHTTPMethod:@"POST"];
+
+    // Standard Twitch Client-Id for Web/iOS
     [request setValue:@"kimne78kx3ncx6brgo4mv6wki5h1ko" forHTTPHeaderField:@"Client-Id"];
     [request setValue:@"application/json" forHTTPHeaderField:@"Accept"];
     [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+    [request setValue:@"https://www.twitch.tv" forHTTPHeaderField:@"Origin"];
+    [request setValue:@"https://www.twitch.tv/" forHTTPHeaderField:@"Referer"];
+    [request setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1" forHTTPHeaderField:@"User-Agent"];
+
+    // Ensure vodID format is correct (sometimes needs 'v' prefix)
+    NSString *formattedID = vodID;
+    if (![vodID hasPrefix:@"v"] && [vodID rangeOfCharacterFromSet:[[NSCharacterSet decimalDigitCharacterSet] invertedSet]].location == NSNotFound) {
+        formattedID = [NSString stringWithFormat:@"v%@", vodID];
+    }
 
     NSDictionary *body = @{
-        @"query": [NSString stringWithFormat:@"query { video(id: \"%@\") { broadcastType, createdAt, seekPreviewsURL, owner { login } }}", vodID]
+        @"query": @"query($id: ID!) { video(id: $id) { broadcastType, createdAt, seekPreviewsURL, owner { login } }}",
+        @"variables": @{@"id": formattedID}
     };
+
     NSData *bodyData = [NSJSONSerialization dataWithJSONObject:body options:0 error:nil];
     [request setHTTPBody:bodyData];
 
@@ -31,10 +44,43 @@
             completion(nil, error);
             return;
         }
+
+        NSError *jsonError;
+        NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:&jsonError];
+        if (jsonError || !json[@"data"]) {
+            // Try again without 'v' prefix if it failed
+            if ([formattedID hasPrefix:@"v"]) {
+                [self fetchVODMetadataWithoutV:vodID completion:completion];
+            } else {
+                completion(nil, jsonError);
+            }
+            return;
+        }
+        completion(json[@"data"][@"video"], nil);
+    }] resume];
+}
+
+// Fallback helper
+- (void)fetchVODMetadataWithoutV:(NSString *)vodID completion:(void (^)(NSDictionary *metadata, NSError *error))completion {
+    NSURL *url = [NSURL URLWithString:@"https://gql.twitch.tv/gql"];
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
+    [request setHTTPMethod:@"POST"];
+    [request setValue:@"kimne78kx3ncx6brgo4mv6wki5h1ko" forHTTPHeaderField:@"Client-Id"];
+    [request setValue:@"application/json" forHTTPHeaderField:@"Accept"];
+    [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+
+    NSDictionary *body = @{
+        @"query": @"query($id: ID!) { video(id: $id) { broadcastType, createdAt, seekPreviewsURL, owner { login } }}",
+        @"variables": @{@"id": vodID}
+    };
+    [request setHTTPBody:[NSJSONSerialization dataWithJSONObject:body options:0 error:nil]];
+    [[NSURLSession.sharedSession dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        if (error) { completion(nil, error); return; }
         NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
         completion(json[@"data"][@"video"], nil);
     }] resume];
 }
+
 
 - (BOOL)isManifestRestricted:(NSData *)data {
     NSString *body = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
@@ -118,6 +164,16 @@
     }
     
     return manifest;
+}
+
+- (NSData *)patchPlaylistData:(NSData *)data {
+    NSString *body = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    if (!body) return data;
+    if ([body containsString:@"-unmuted"]) {
+        NSString *patchedBody = [body stringByReplacingOccurrencesOfString:@"-unmuted" withString:@"-muted"];
+        return [patchedBody dataUsingEncoding:NSUTF8StringEncoding];
+    }
+    return data;
 }
 
 @end
