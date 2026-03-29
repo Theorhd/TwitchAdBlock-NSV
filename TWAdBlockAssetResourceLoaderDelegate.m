@@ -31,33 +31,35 @@ extern NSUserDefaults *tweakDefaults;
   
   [[session dataTaskWithRequest:request
               completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-                if (error) return [loadingRequest finishLoadingWithError:error];
-
-                __block NSData *finalData = data;
-                NSHTTPURLResponse *httpResponse = (NSHTTPURLResponse *)response;
-
-                if (isVOD && vodUnlockEnabled) {
-                    TWAdBlockVODUnlocker *unlocker = [TWAdBlockVODUnlocker sharedInstance];
-                    if (httpResponse.statusCode == 403 || [unlocker isManifestRestricted:data]) {
-                        // Extract vodID from URL: /vod/v2/12345678.m3u8 or /vod/12345678.m3u8
-                        NSString *vodID = [request.URL.lastPathComponent stringByDeletingPathExtension];
-
-                        dispatch_semaphore_t sem = dispatch_semaphore_create(0);
-                        [unlocker fetchVODMetadata:vodID completion:^(NSDictionary *metadata, NSError *gqlError) {
-                            if (metadata && !gqlError) {
-                                NSString *fakeManifest = [unlocker reconstructManifest:metadata forVodID:vodID];
-                                if (fakeManifest) {
-                                    finalData = [fakeManifest dataUsingEncoding:NSUTF8StringEncoding];
-                                }
-                            }
-                            dispatch_semaphore_signal(sem);
-                        }];
-                        dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
-                    }
+                if (error) {
+                    [loadingRequest finishLoadingWithError:error];
+                    return;
                 }
-                loadingRequest.contentInformationRequest.contentType = AVFileTypeMPEG4;
-                [dataRequest respondWithData:finalData];
-                [loadingRequest finishLoading];
+
+                NSHTTPURLResponse *httpResponse = (NSHTTPURLResponse *)response;
+                TWAdBlockVODUnlocker *unlocker = [TWAdBlockVODUnlocker sharedInstance];
+
+                if (isVOD && vodUnlockEnabled && (httpResponse.statusCode == 403 || [unlocker isManifestRestricted:data])) {
+                    NSString *vodID = [request.URL.lastPathComponent stringByDeletingPathExtension];
+                    
+                    [unlocker fetchVODMetadata:vodID completion:^(NSDictionary *metadata, NSError *gqlError) {
+                        NSData *finalData = data;
+                        if (metadata && !gqlError) {
+                            NSString *fakeManifest = [unlocker reconstructManifest:metadata forVodID:vodID];
+                            if (fakeManifest) {
+                                finalData = [fakeManifest dataUsingEncoding:NSUTF8StringEncoding];
+                            }
+                        }
+                        
+                        loadingRequest.contentInformationRequest.contentType = AVFileTypeMPEG4;
+                        [dataRequest respondWithData:finalData];
+                        [loadingRequest finishLoading];
+                    }];
+                } else {
+                    loadingRequest.contentInformationRequest.contentType = AVFileTypeMPEG4;
+                    [dataRequest respondWithData:data];
+                    [loadingRequest finishLoading];
+                }
               }] resume];
   return YES;
 }

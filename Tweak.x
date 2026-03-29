@@ -204,20 +204,22 @@ static void *hook_swift_unknownObjectWeakLoadStrong(void *ref) {
 
 // Helper to hide views containing specific text
 static void hideIfRestricted(UIView *view) {
-    if (![tweakDefaults boolForKey:@"TWAdBlockRestrictionRemoverEnabled"]) return;
+    if (!view || ![tweakDefaults boolForKey:@"TWAdBlockRestrictionRemoverEnabled"]) return;
     
-    // Recursive search for labels containing restricted text
-    for (UIView *subview in view.subviews) {
-        if ([subview isKindOfClass:[UILabel class]]) {
-            UILabel *label = (UILabel *)subview;
-            NSString *text = [label.text lowercaseString];
-            if ([text containsString:@"réservé"] || [text containsString:@"abonné"] || [text containsString:@"sub"] || [text containsString:@"restricted"]) {
-                view.hidden = YES;
-                return;
+    @try {
+        // Recursive search for labels containing restricted text
+        for (UIView *subview in view.subviews) {
+            if ([subview isKindOfClass:[UILabel class]]) {
+                UILabel *label = (UILabel *)subview;
+                NSString *text = [label.text lowercaseString];
+                if (text && ([text containsString:@"réservé"] || [text containsString:@"abonné"] || [text containsString:@"sub"] || [text containsString:@"restricted"])) {
+                    view.hidden = YES;
+                    return;
+                }
             }
+            if (subview.subviews.count > 0) hideIfRestricted(subview);
         }
-        hideIfRestricted(subview);
-    }
+    } @catch (NSException *e) {}
 }
 
 @interface _TtC6Twitch21PlayerCoreCoordinator : NSObject
@@ -229,14 +231,12 @@ static void hideIfRestricted(UIView *view) {
 // Deeper logic to bypass restriction checks
 %hook _TtC6Twitch21PlayerCoreCoordinator
 - (void)handlePlaybackStatusUpdate:(id)arg1 {
-    // Force the coordinator to ignore restricted status
     %orig;
 }
 %end
 
 %hook _TtC6Twitch26PlaybackRequestInterceptor
 - (id)interceptPlaybackRequest:(id)arg1 {
-    // Potential place to modify request before it's sent
     return %orig;
 }
 %end
@@ -245,7 +245,7 @@ static void hideIfRestricted(UIView *view) {
 - (void)didMoveToWindow {
   %orig;
   if ([tweakDefaults boolForKey:@"TWAdBlockRestrictionRemoverEnabled"]) {
-    ((UIView *)self).hidden = YES;
+    @try { ((UIView *)self).hidden = YES; } @catch (NSException *e) {}
   }
 }
 %end
@@ -254,7 +254,7 @@ static void hideIfRestricted(UIView *view) {
 - (void)didMoveToWindow {
   %orig;
   if ([tweakDefaults boolForKey:@"TWAdBlockRestrictionRemoverEnabled"]) {
-    ((UIView *)self).hidden = YES;
+    @try { ((UIView *)self).hidden = YES; } @catch (NSException *e) {}
   }
 }
 %end
@@ -263,7 +263,7 @@ static void hideIfRestricted(UIView *view) {
 - (void)didMoveToWindow {
   %orig;
   if ([tweakDefaults boolForKey:@"TWAdBlockRestrictionRemoverEnabled"]) {
-    ((UIView *)self).hidden = YES;
+    @try { ((UIView *)self).hidden = YES; } @catch (NSException *e) {}
   }
 }
 %end
@@ -272,7 +272,7 @@ static void hideIfRestricted(UIView *view) {
 - (void)didMoveToWindow {
   %orig;
   if ([tweakDefaults boolForKey:@"TWAdBlockRestrictionRemoverEnabled"]) {
-    ((UIView *)self).hidden = YES;
+    @try { ((UIView *)self).hidden = YES; } @catch (NSException *e) {}
   }
 }
 %end
@@ -280,7 +280,7 @@ static void hideIfRestricted(UIView *view) {
 %hook _TtC6Twitch22PlayerInterstitialView
 - (void)didMoveToWindow {
   %orig;
-  hideIfRestricted(self);
+  hideIfRestricted((UIView *)self);
 }
 %end
 
@@ -288,7 +288,7 @@ static void hideIfRestricted(UIView *view) {
 - (void)viewWillAppear:(BOOL)animated {
     %orig;
     if ([tweakDefaults boolForKey:@"TWAdBlockRestrictionRemoverEnabled"]) {
-        [self dismissViewControllerAnimated:YES completion:nil];
+        @try { [self dismissViewControllerAnimated:YES completion:nil]; } @catch (NSException *e) {}
     }
 }
 %end
@@ -297,7 +297,7 @@ static void hideIfRestricted(UIView *view) {
 - (void)viewDidAppear:(BOOL)animated {
     %orig;
     if ([tweakDefaults boolForKey:@"TWAdBlockRestrictionRemoverEnabled"]) {
-        hideIfRestricted(self.view);
+        @try { hideIfRestricted([(id)self view]); } @catch (NSException *e) {}
     }
 }
 %end
@@ -306,7 +306,7 @@ static void hideIfRestricted(UIView *view) {
 - (void)didMoveToWindow {
   %orig;
   if ([tweakDefaults boolForKey:@"TWAdBlockRestrictionRemoverEnabled"]) {
-    ((UIView *)self).hidden = YES;
+    @try { ((UIView *)self).hidden = YES; } @catch (NSException *e) {}
   }
 }
 %end
@@ -314,12 +314,6 @@ static void hideIfRestricted(UIView *view) {
 %hook _TtC6Twitch11TheaterView
 - (void)layoutSubviews {
     %orig;
-    if ([tweakDefaults boolForKey:@"TWAdBlockRestrictionRemoverEnabled"]) {
-        UIView *errorView = [(id)self valueForKey:@"requestErrorOverlayView"];
-        if (errorView && [errorView isKindOfClass:[UIView class]]) {
-            ((UIView *)errorView).hidden = YES;
-        }
-    }
 }
 %end
 
