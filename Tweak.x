@@ -302,6 +302,27 @@ static void hideIfRestricted(UIView *view) {
 }
 %end
 
+%hook _TtC6Twitch30TheaterRequestErrorOverlayView
+- (void)didMoveToWindow {
+  %orig;
+  if ([tweakDefaults boolForKey:@"TWAdBlockRestrictionRemoverEnabled"]) {
+    ((UIView *)self).hidden = YES;
+  }
+}
+%end
+
+%hook _TtC6Twitch11TheaterView
+- (void)layoutSubviews {
+    %orig;
+    if ([tweakDefaults boolForKey:@"TWAdBlockRestrictionRemoverEnabled"]) {
+        UIView *errorView = [self valueForKey:@"requestErrorOverlayView"];
+        if (errorView && [errorView isKindOfClass:[UIView class]]) {
+            errorView.hidden = YES;
+        }
+    }
+}
+%end
+
 %ctor {
   rebind_symbols(
       (struct rebinding[]){

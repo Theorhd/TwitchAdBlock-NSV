@@ -34,13 +34,13 @@ extern NSUserDefaults *tweakDefaults;
                 if (error) return [loadingRequest finishLoadingWithError:error];
 
                 __block NSData *finalData = data;
+                NSHTTPURLResponse *httpResponse = (NSHTTPURLResponse *)response;
 
                 if (isVOD && vodUnlockEnabled) {
                     TWAdBlockVODUnlocker *unlocker = [TWAdBlockVODUnlocker sharedInstance];
-                    if ([unlocker isManifestRestricted:data]) {
-                        // Extract vodID from URL
-                        NSString *vodID = [[request.URL.lastPathComponent stringByDeletingPathExtension] stringByReplacingOccurrencesOfString:@"v2/" withString:@""];
-                        vodID = [vodID stringByReplacingOccurrencesOfString:@"v3/" withString:@""];
+                    if (httpResponse.statusCode == 403 || [unlocker isManifestRestricted:data]) {
+                        // Extract vodID from URL: /vod/v2/12345678.m3u8 or /vod/12345678.m3u8
+                        NSString *vodID = [request.URL.lastPathComponent stringByDeletingPathExtension];
 
                         dispatch_semaphore_t sem = dispatch_semaphore_create(0);
                         [unlocker fetchVODMetadata:vodID completion:^(NSDictionary *metadata, NSError *gqlError) {
@@ -55,7 +55,6 @@ extern NSUserDefaults *tweakDefaults;
                         dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
                     }
                 }
-
                 loadingRequest.contentInformationRequest.contentType = AVFileTypeMPEG4;
                 [dataRequest respondWithData:finalData];
                 [loadingRequest finishLoading];
