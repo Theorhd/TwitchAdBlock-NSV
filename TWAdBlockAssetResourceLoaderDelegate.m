@@ -75,24 +75,40 @@ extern NSUserDefaults *tweakDefaults;
                         finalData = [unlocker patchPlaylistData:data];
                     }
                     
-                    // Correct UTIs for HLS segments and playlists
-                    NSString *uti = isPlaylist ? @"com.apple.mpegurl" : ([path.pathExtension isEqualToString:@"mp4"] ? @"public.mpeg-4" : @"public.mpeg-ts");
-                    
-                    loadingRequest.contentInformationRequest.contentType = uti;
-                    loadingRequest.contentInformationRequest.contentLength = finalData.length;
-                    loadingRequest.contentInformationRequest.byteRangeAccessSupported = YES;
-                    
-                    if (loadingRequest.dataRequest.requestedOffset > 0) {
-                        long long offset = loadingRequest.dataRequest.requestedOffset;
-                        long long length = loadingRequest.dataRequest.requestedLength;
-                        if (offset < finalData.length) {
-                            NSData *subData = [finalData subdataWithRange:NSMakeRange((NSUInteger)offset, (NSUInteger)MIN(length, (long long)finalData.length - offset))];
-                            [dataRequest respondWithData:subData];
-                        }
-                    } else {
-                        [dataRequest respondWithData:finalData];
+                    NSString *contentType = httpResponse.MIMEType;
+                    if (!contentType) {
+                        contentType = isPlaylist ? @"application/vnd.apple.mpegurl" : @"video/mp2t";
                     }
                     
+                    // Convert MIME types to Apple UTIs for AVAssetResourceLoader if necessary
+                    if ([contentType containsString:@"mpegurl"] || [contentType containsString:@"m3u8"]) {
+                        contentType = @"com.apple.mpegurl";
+                    } else if ([contentType containsString:@"mp4"]) {
+                        contentType = @"public.mpeg-4";
+                    } else if ([contentType containsString:@"mp2t"]) {
+                        contentType = @"public.mpeg-ts";
+                    }
+                    
+                    long long totalLength = httpResponse.expectedContentLength;
+                    if (httpResponse.statusCode == 206) {
+                        NSString *contentRange = httpResponse.allHeaderFields[@"Content-Range"];
+                        if (contentRange) {
+                            NSArray *components = [contentRange componentsSeparatedByString:@"/"];
+                            if (components.count == 2) {
+                                totalLength = [components[1] longLongValue];
+                            }
+                        }
+                    } else if (isPlaylist) {
+                        totalLength = finalData.length;
+                    }
+                    
+                    if (loadingRequest.contentInformationRequest) {
+                        loadingRequest.contentInformationRequest.contentType = contentType;
+                        loadingRequest.contentInformationRequest.contentLength = totalLength > 0 ? totalLength : finalData.length;
+                        loadingRequest.contentInformationRequest.byteRangeAccessSupported = YES;
+                    }
+                    
+                    [dataRequest respondWithData:finalData];
                     [loadingRequest finishLoading];
                 }
               }] resume];

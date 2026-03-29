@@ -159,23 +159,10 @@
         patchedBody = [patchedBody stringByReplacingOccurrencesOfString:@"-unmuted" withString:@"-muted"];
     }
     
-    // 2. Tunneling: Force segments to pass through our resource loader
-    // Replace https://[domain]/... with twab://[domain]/...
-    // Only for known Twitch video domains
-    NSArray *domains = @[@"cloudfront.net", @"ttvnw.net", @"akamaized.net"];
-    for (NSString *domain in domains) {
-        NSString *search = [NSString stringWithFormat:@"https://%@.", domain];
-        NSString *replace = [NSString stringWithFormat:@"twab://%@.", domain];
-        if ([patchedBody containsString:search]) {
-            patchedBody = [patchedBody stringByReplacingOccurrencesOfString:search withString:replace];
-        }
-        
-        // Also handle https://domain/ (without dot)
-        search = [NSString stringWithFormat:@"https://%@", domain];
-        replace = [NSString stringWithFormat:@"twab://%@", domain];
-        if ([patchedBody containsString:search]) {
-            patchedBody = [patchedBody stringByReplacingOccurrencesOfString:search withString:replace];
-        }
+    // 2. Tunneling: Force all segment/playlist URLs to pass through our resource loader
+    // Replace all absolute https:// links with twab:// so AVPlayer routes them to us
+    if ([patchedBody containsString:@"https://"]) {
+        patchedBody = [patchedBody stringByReplacingOccurrencesOfString:@"https://" withString:@"twab://"];
     }
     
     return [patchedBody dataUsingEncoding:NSUTF8StringEncoding];
