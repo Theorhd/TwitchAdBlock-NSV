@@ -9,30 +9,20 @@ extern NSUserDefaults *tweakDefaults;
     if (!loadingRequest.contentInformationRequest) return;
     
     NSString *uti = @"public.mpeg-ts";
-    NSString *contentType = response.allHeaderFields[@"Content-Type"] ?: @"video/mp2t";
+    NSString *contentType = @"video/mp2t";
     
-    if ([contentType containsString:@"mpegurl"] || [loadingRequest.request.URL.pathExtension isEqualToString:@"m3u8"]) {
+    NSString *path = loadingRequest.request.URL.path.lowercaseString;
+    if ([path hasSuffix:@".m3u8"] || [path hasSuffix:@".m3u"]) {
         uti = @"com.apple.mpegurl";
         contentType = @"application/vnd.apple.mpegurl";
-    } else if ([contentType containsString:@"mp4"] || [loadingRequest.request.URL.pathExtension isEqualToString:@"mp4"]) {
+    } else if ([path hasSuffix:@".mp4"]) {
         uti = @"public.mpeg-4";
         contentType = @"video/mp4";
     }
     
     loadingRequest.contentInformationRequest.contentType = uti;
     loadingRequest.contentInformationRequest.byteRangeAccessSupported = YES;
-    
-    // Si la réponse est un 206 (Partial Content), extraire la taille totale depuis Content-Range
-    long long totalLength = data.length;
-    NSString *contentRange = response.allHeaderFields[@"Content-Range"];
-    if (contentRange) {
-        NSArray *parts = [contentRange componentsSeparatedByString:@"/"];
-        if (parts.count > 1) {
-            totalLength = [parts.lastObject longLongValue];
-        }
-    }
-    
-    loadingRequest.contentInformationRequest.contentLength = totalLength;
+    loadingRequest.contentInformationRequest.contentLength = data.length;
 }
 
 - (BOOL)handleLoadingRequest:(AVAssetResourceLoadingRequest *)loadingRequest {
@@ -45,14 +35,14 @@ extern NSUserDefaults *tweakDefaults;
 
   NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:components.URL];
   
-  // Copier les headers d'origine (important pour les Range requests de segments)
-  [request setAllHTTPHeaderFields:loadingRequest.request.allHTTPHeaderFields];
+  // Headers optimisés
   [request setValue:@"https://www.twitch.tv" forHTTPHeaderField:@"Origin"];
   [request setValue:@"https://www.twitch.tv/" forHTTPHeaderField:@"Referer"];
   [request setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1" forHTTPHeaderField:@"User-Agent"];
 
   BOOL isUsher = [request.URL.host isEqualToString:@"usher.ttvnw.net"];
-  BOOL isMasterManifest = isUsher && [request.URL.path containsString:@"/vod/"] && ![request.URL.path containsString:@"index-dvr"] && ![request.URL.path containsString:@"highlight"];
+  BOOL isVOD = [request.URL.path containsString:@"/vod/"];
+  BOOL isMasterManifest = isUsher && isVOD && ![request.URL.path containsString:@"index-dvr"] && ![request.URL.path containsString:@"highlight"];
   BOOL vodUnlockEnabled = [tweakDefaults boolForKey:@"TWAdBlockVODUnlockEnabled"];
   BOOL proxyEnabled = [tweakDefaults boolForKey:@"TWAdBlockProxyEnabled"];
 
@@ -68,7 +58,7 @@ extern NSUserDefaults *tweakDefaults;
                 NSHTTPURLResponse *httpResponse = (NSHTTPURLResponse *)response;
                 TWAdBlockVODUnlocker *unlocker = [TWAdBlockVODUnlocker sharedInstance];
                 
-                // 1. Reconstruction du Master Manifest si restreint ou erreur 403/401
+                // 1. Master Manifest
                 if (isMasterManifest && vodUnlockEnabled && (httpResponse.statusCode >= 400 || [unlocker isManifestRestricted:data])) {
                     NSString *vodID = [request.URL.lastPathComponent stringByDeletingPathExtension];
                     [unlocker fetchVODMetadata:vodID completion:^(NSDictionary *metadata, NSError *gqlError) {
@@ -76,7 +66,6 @@ extern NSUserDefaults *tweakDefaults;
                             NSString *fakeManifest = [unlocker reconstructManifest:metadata forVodID:vodID];
                             if (fakeManifest) {
                                 NSData *finalData = [fakeManifest dataUsingEncoding:NSUTF8StringEncoding];
-                                // Créer une fausse réponse 200 OK pour ne pas effrayer AVPlayer
                                 NSHTTPURLResponse *fakeResponse = [[NSHTTPURLResponse alloc] initWithURL:request.URL statusCode:200 HTTPVersion:@"HTTP/1.1" headerFields:@{@"Content-Type": @"application/vnd.apple.mpegurl"}];
                                 [self fillContentInformation:loadingRequest fromResponse:fakeResponse data:finalData];
                                 [dataRequest respondWithData:finalData];
@@ -84,7 +73,6 @@ extern NSUserDefaults *tweakDefaults;
                                 return;
                             }
                         }
-                        // Fallback si GQL échoue
                         [self fillContentInformation:loadingRequest fromResponse:httpResponse data:data];
                         [dataRequest respondWithData:data];
                         [loadingRequest finishLoading];
@@ -92,14 +80,23 @@ extern NSUserDefaults *tweakDefaults;
                     return;
                 }
 
-                // 2. Patch des sub-playlists (.m3u8) pour corriger les segments unmuted
+                // 2. Playlist secondaire ou Segments
                 NSData *finalData = data;
                 if ([request.URL.pathExtension isEqualToString:@"m3u8"]) {
                     finalData = [unlocker patchPlaylistData:data];
                 }
 
                 [self fillContentInformation:loadingRequest fromResponse:httpResponse data:finalData];
-                [dataRequest respondWithData:finalData];
+                
+                // On répond avec les données, en gérant le cas où AVPlayer demande un fragment
+                if (dataRequest.requestedOffset < finalData.length) {
+                    NSUInteger start = (NSUInteger)dataRequest.requestedOffset;
+                    NSUInteger length = MIN((NSUInteger)dataRequest.requestedLength, finalData.length - start);
+                    [dataRequest respondWithData:[finalData subdataWithRange:NSMakeRange(start, length)]];
+                } else {
+                    [dataRequest respondWithData:finalData];
+                }
+                
                 [loadingRequest finishLoading];
               }] resume];
   return YES;

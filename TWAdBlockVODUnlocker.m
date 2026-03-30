@@ -118,18 +118,17 @@
     NSString *vodSpecialID = pathComponents[storyboardIndex - 1];
     NSString *servingID = [[NSUUID UUID].UUIDString stringByReplacingOccurrencesOfString:@"-" withString:@""];
     
-    // Manifest Master plus complet pour iOS
     NSMutableString *manifest = [NSMutableString stringWithFormat:@"#EXTM3U\n"];
-    [manifest appendFormat:@"#EXT-X-VERSION:3\n"];
     [manifest appendFormat:@"#EXT-X-TWITCH-INFO:ORIGIN=\"s3\",B=\"false\",REGION=\"EU\",USER-IP=\"127.0.0.1\",SERVING-ID=\"%@\",CLUSTER=\"cloudfront_vod\",USER-COUNTRY=\"FR\",MANIFEST-CLUSTER=\"cloudfront_vod\"\n", servingID];
     
+    // On définit les qualités de manière simple
     NSDictionary *resolutions = @{
-        @"160p30": @{@"res": @"284x160", @"fps": @30, @"bw": @638000},
-        @"360p30": @{@"res": @"640x360", @"fps": @30, @"bw": @1064000},
-        @"480p30": @{@"res": @"854x480", @"fps": @30, @"bw": @1562000},
-        @"720p60": @{@"res": @"1280x720", @"fps": @60, @"bw": @3708000},
-        @"1080p60": @{@"res": @"1920x1080", @"fps": @60, @"bw": @8254000},
-        @"chunked": @{@"res": @"1920x1080", @"fps": @60, @"bw": @8534000}
+        @"chunked": @{@"res": @"1920x1080", @"fps": @60, @"bw": @8534000, @"name": @"Source"},
+        @"1080p60": @{@"res": @"1920x1080", @"fps": @60, @"bw": @8254000, @"name": @"1080p60"},
+        @"720p60": @{@"res": @"1280x720", @"fps": @60, @"bw": @3708000, @"name": @"720p60"},
+        @"480p30": @{@"res": @"854x480", @"fps": @30, @"bw": @1562000, @"name": @"480p"},
+        @"360p30": @{@"res": @"640x360", @"fps": @30, @"bw": @1064000, @"name": @"360p"},
+        @"160p30": @{@"res": @"284x160", @"fps": @30, @"bw": @638000, @"name": @"160p"}
     };
     
     NSArray *keys = @[@"chunked", @"1080p60", @"720p60", @"480p30", @"360p30", @"160p30"];
@@ -151,11 +150,8 @@
             streamUrl = [NSString stringWithFormat:@"twab://%@/%@/%@/index-dvr.m3u8", domain, vodSpecialID, resKey];
         }
 
-        NSString *quality = [resKey isEqualToString:@"chunked"] ? @"1080p (source)" : resKey;
         NSDictionary *resInfo = resolutions[resKey];
-        
-        [manifest appendFormat:@"#EXT-X-MEDIA:TYPE=VIDEO,GROUP-ID=\"%@\",NAME=\"%@\",AUTOSELECT=YES,DEFAULT=%@\n", resKey, quality, [resKey isEqualToString:@"chunked"] ? @"YES" : @"NO"];
-        [manifest appendFormat:@"#EXT-X-STREAM-INF:BANDWIDTH=%@,CODECS=\"avc1.4D001E,mp4a.40.2\",RESOLUTION=%@,VIDEO=\"%@\",FRAME-RATE=%@\n", resInfo[@"bw"], resInfo[@"res"], resKey, resInfo[@"fps"]];
+        [manifest appendFormat:@"#EXT-X-STREAM-INF:BANDWIDTH=%@,RESOLUTION=%@,FRAME-RATE=%@,CODECS=\"avc1.4D401E,mp4a.40.2\",VIDEO-RANGE=SDR,NAME=\"%@\"\n", resInfo[@"bw"], resInfo[@"res"], resInfo[@"fps"], resInfo[@"name"]];
         [manifest appendFormat:@"%@\n", streamUrl];
     }
     
