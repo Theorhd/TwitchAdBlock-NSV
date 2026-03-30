@@ -121,9 +121,10 @@ static void hideIfRestricted(UIView *view) {
 %end
 
 // 8. CTOR & SYMBOLS
-static void (*orig_PlaybackAccessTokenParams_init)(id, id, id, id, id, id, id, id);
-static void hook_PlaybackAccessTokenParams_init(id a, id b, id c, id d, id e, id f, id g, id h) {
-    orig_PlaybackAccessTokenParams_init(a, (id)2, c, d, e, f, g, h);
+static void (*orig_PlaybackAccessTokenParams_init)(void *, void *, void *, void *, void *, void *, void *, void *);
+static void hook_PlaybackAccessTokenParams_init(void *a, void *b, void *c, void *d, void *e, void *f, void *g, void *h) {
+    // 2 = some(false) in Swift Nullable<Bool>
+    orig_PlaybackAccessTokenParams_init(a, (void *)2, c, d, e, f, g, h);
 }
 
 %ctor {
