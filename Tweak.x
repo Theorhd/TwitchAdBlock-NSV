@@ -213,68 +213,63 @@ static void *hook_swift_unknownObjectWeakLoadStrong(void *ref) {
 @interface _TtC6Twitch30TheaterRequestErrorOverlayView : UIView
 @end
 
-@interface _TtC6Twitch19TheaterMetadataView : UIView
-@end
-
-@interface _TtC6Twitch31SubscriptionBenefitsSummaryView : UIView
-@end
-
 @interface _TtC6Twitch20UpsellViewController : UIViewController
 @end
 
-// Helper to hide views containing specific text
-static void hideIfRestricted(UIView *view) {
-    if (!view || ![tweakDefaults boolForKey:@"TWAdBlockRestrictionRemoverEnabled"]) return;
-    
-    @try {
-        if ([view isKindOfClass:[UILabel class]]) {
-            UILabel *label = (UILabel *)view;
-            NSString *text = [label.text lowercaseString];
-            if (text && ([text containsString:@"réservé"] || [text containsString:@"abonné"] || [text containsString:@"restricted"] || [text containsString:@"sub"])) {
-                // Remonter jusqu'au conteneur parent pour tout cacher (l'overlay entier)
-                UIView *parent = view.superview;
-                while (parent && parent.subviews.count < 10) { // Remonter modérément
-                    parent.hidden = YES;
-                    parent = parent.superview;
-                }
-                return;
-            }
-        }
-        for (UIView *subview in view.subviews) {
-            hideIfRestricted(subview);
-        }
-    } @catch (NSException *e) {}
+@interface _TtC9TwitchKit5Video : NSObject
+@end
+
+%hook _TtC9TwitchKit5Video
+- (BOOL)currentUserIsRestricted {
+    return [tweakDefaults boolForKey:@"TWAdBlockVODUnlockEnabled"] ? NO : %orig;
 }
+- (BOOL)isSubOnly {
+    return [tweakDefaults boolForKey:@"TWAdBlockVODUnlockEnabled"] ? NO : %orig;
+}
+%end
+
+%hook _TtC6Twitch30TheaterRequestErrorOverlayView
+- (void)didMoveToWindow {
+    %orig;
+    if ([tweakDefaults boolForKey:@"TWAdBlockRestrictionRemoverEnabled"]) {
+        [self setHidden:YES];
+        [self setAlpha:0.0];
+    }
+}
+- (void)updateWithState:(id)arg1 {
+    %orig;
+    if ([tweakDefaults boolForKey:@"TWAdBlockRestrictionRemoverEnabled"]) {
+        [self setHidden:YES];
+        [self setAlpha:0.0];
+    }
+}
+%end
+
+%hook _TtC6Twitch20UpsellViewController
+- (void)viewWillAppear:(BOOL)animated {
+    %orig;
+    if ([tweakDefaults boolForKey:@"TWAdBlockRestrictionRemoverEnabled"]) {
+        [self.view setHidden:YES];
+        [self dismissViewControllerAnimated:NO completion:nil];
+    }
+}
+%end
 
 %hook _TtC6Twitch21TheaterViewController
 - (void)viewDidAppear:(BOOL)animated {
     %orig;
     if ([tweakDefaults boolForKey:@"TWAdBlockRestrictionRemoverEnabled"]) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            @try {
-                id theaterView = [(id)self valueForKey:@"theaterView"];
-                if (theaterView) {
-                    UIView *errorOverlay = [(id)theaterView valueForKey:@"requestErrorOverlayView"];
-                    if (errorOverlay) errorOverlay.hidden = YES;
+        @try {
+            id theaterView = [(id)self valueForKey:@"theaterView"];
+            if (theaterView) {
+                UIView *errorOverlay = [(id)theaterView valueForKey:@"requestErrorOverlayView"];
+                if (errorOverlay) {
+                    errorOverlay.hidden = YES;
+                    errorOverlay.alpha = 0.0;
                 }
-                hideIfRestricted([(id)self view]);
-            } @catch (NSException *e) {}
-        });
+            }
+        } @catch (NSException *e) {}
     }
-}
-%end
-
-// Hook sur l'intercepteur de requêtes de lecture pour forcer la réussite
-%hook _TtC6Twitch26PlaybackRequestInterceptor
-- (void)handlePlaybackAccessTokenSuccess:(id)arg1 {
-    %orig;
-}
-- (void)handlePlaybackAccessTokenFailure:(id)arg1 {
-    if ([tweakDefaults boolForKey:@"TWAdBlockVODUnlockEnabled"]) {
-        // Simuler un succès ou ignorer l'échec car notre proxy va reconstruire le manifest
-        return;
-    }
-    %orig;
 }
 %end
 
@@ -289,6 +284,28 @@ static void hideIfRestricted(UIView *view) {
     }
 }
 %end
+
+// Helper to hide views containing specific text
+static void hideIfRestricted(UIView *view) {
+    if (!view || ![tweakDefaults boolForKey:@"TWAdBlockRestrictionRemoverEnabled"]) return;
+    
+    @try {
+        if ([view isKindOfClass:[UILabel class]]) {
+            UILabel *label = (UILabel *)view;
+            NSString *text = [label.text lowercaseString];
+            if (text && ([text containsString:@"réservé"] || [text containsString:@"abonné"] || [text containsString:@"restricted"] || [text containsString:@"sub"])) {
+                // Cacher l'ancêtre pour être sûr de tout supprimer
+                UIView *v = view;
+                for (int i = 0; i < 3 && v.superview; i++) v = v.superview;
+                v.hidden = YES;
+                return;
+            }
+        }
+        for (UIView *subview in view.subviews) {
+            hideIfRestricted(subview);
+        }
+    } @catch (NSException *e) {}
+}
 
 // Low-level hook using fishhook for PlaybackAccessTokenParams
 // Based on Ghidra dump: _$s13TwitchGraphQL25PlaybackAccessTokenParamsV...

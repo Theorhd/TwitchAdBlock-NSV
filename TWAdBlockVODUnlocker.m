@@ -79,12 +79,15 @@
     NSString *body = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
     if (!body) return NO;
     NSString *lower = [body lowercaseString];
+    
+    // Détection élargie des restrictions et erreurs JSON renvoyées à la place du manifest
     return [lower containsString:@"vod_manifest_restricted"] ||
            [lower containsString:@"errorauthorization"] ||
            [lower containsString:@"restricted=1"] ||
            [lower containsString:@"restricted=\"true\""] ||
            [lower containsString:@"#ext-x-twitch-restricted"] ||
-           [lower containsString:@"access denied"];
+           [lower containsString:@"access denied"] ||
+           ([lower containsString:@"{"] && [lower containsString:@"error"]);
 }
 
 - (NSString *)reconstructManifest:(NSDictionary *)vodData forVodID:(NSString *)vodID {
