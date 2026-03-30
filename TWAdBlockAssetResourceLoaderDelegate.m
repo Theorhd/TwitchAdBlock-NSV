@@ -32,11 +32,15 @@ extern NSUserDefaults *tweakDefaults;
   components.scheme = @"https";
 
   NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:components.URL];
-  [request setAllHTTPHeaderFields:loadingRequest.request.allHTTPHeaderFields];
+  
+  // Set headers that Twitch/Cloudfront might expect
+  [request setValue:@"https://www.twitch.tv" forHTTPHeaderField:@"Origin"];
+  [request setValue:@"https://www.twitch.tv/" forHTTPHeaderField:@"Referer"];
   [request setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1" forHTTPHeaderField:@"User-Agent"];
 
-  BOOL isVOD = [request.URL.path containsString:@"/vod/"];
-  BOOL isMasterManifest = isVOD && ![request.URL.path containsString:@"index-dvr"];
+  BOOL isUsher = [request.URL.host isEqualToString:@"usher.ttvnw.net"];
+  BOOL isVOD = isUsher && [request.URL.path containsString:@"/vod/"];
+  BOOL isMasterManifest = isVOD && ![request.URL.path containsString:@"index-dvr"] && ![request.URL.path containsString:@"highlight"];
   BOOL vodUnlockEnabled = [tweakDefaults boolForKey:@"TWAdBlockVODUnlockEnabled"];
   BOOL proxyEnabled = [tweakDefaults boolForKey:@"TWAdBlockProxyEnabled"];
 
@@ -53,15 +57,23 @@ extern NSUserDefaults *tweakDefaults;
                 TWAdBlockVODUnlocker *unlocker = [TWAdBlockVODUnlocker sharedInstance];
                 
                 // 1. Check if we need to reconstruct the master manifest
-                if (isMasterManifest && vodUnlockEnabled && (httpResponse.statusCode == 403 || [unlocker isManifestRestricted:data])) {
+                if (isMasterManifest && vodUnlockEnabled && (httpResponse.statusCode >= 400 || [unlocker isManifestRestricted:data])) {
                     NSString *vodID = [request.URL.lastPathComponent stringByDeletingPathExtension];
                     [unlocker fetchVODMetadata:vodID completion:^(NSDictionary *metadata, NSError *gqlError) {
                         NSData *finalData = data;
                         if (metadata && !gqlError) {
                             NSString *fakeManifest = [unlocker reconstructManifest:metadata forVodID:vodID];
-                            if (fakeManifest) finalData = [fakeManifest dataUsingEncoding:NSUTF8StringEncoding];
+                            if (fakeManifest) {
+                                finalData = [fakeManifest dataUsingEncoding:NSUTF8StringEncoding];
+                                // Use a fake 200 response for the reconstructed manifest to avoid player confusion
+                                NSHTTPURLResponse *fakeResponse = [[NSHTTPURLResponse alloc] initWithURL:request.URL statusCode:200 HTTPVersion:@"HTTP/1.1" headerFields:@{@"Content-Type": @"application/vnd.apple.mpegurl"}];
+                                [self fillContentInformation:loadingRequest fromResponse:fakeResponse data:finalData];
+                            } else {
+                                [self fillContentInformation:loadingRequest fromResponse:httpResponse data:finalData];
+                            }
+                        } else {
+                            [self fillContentInformation:loadingRequest fromResponse:httpResponse data:finalData];
                         }
-                        [self fillContentInformation:loadingRequest fromResponse:httpResponse data:finalData];
                         [dataRequest respondWithData:finalData];
                         [loadingRequest finishLoading];
                     }];
@@ -75,16 +87,7 @@ extern NSUserDefaults *tweakDefaults;
                 }
 
                 [self fillContentInformation:loadingRequest fromResponse:httpResponse data:finalData];
-                
-                // Handle range requests correctly
-                if (dataRequest.requestedOffset > 0) {
-                    // NSURLSession already handled the range if request headers were passed
-                    // but we ensure we don't send more than requested.
-                    [dataRequest respondWithData:finalData];
-                } else {
-                    [dataRequest respondWithData:finalData];
-                }
-                
+                [dataRequest respondWithData:finalData];
                 [loadingRequest finishLoading];
               }] resume];
   return YES;

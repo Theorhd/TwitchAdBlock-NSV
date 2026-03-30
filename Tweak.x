@@ -49,26 +49,39 @@ TWAdBlockAssetResourceLoaderDelegate *assetResourceLoaderDelegate;
   BOOL proxyEnabled = [tweakDefaults boolForKey:@"TWAdBlockProxyEnabled"];
   BOOL vodUnlockEnabled = [tweakDefaults boolForKey:@"TWAdBlockVODUnlockEnabled"];
 
-  if (!adBlockEnabled || (!proxyEnabled && !vodUnlockEnabled) ||
-      ![URL.scheme isEqualToString:@"https"] || ![URL.host isEqualToString:@"usher.ttvnw.net"])
-    return %orig;
+  if (!adBlockEnabled || (!proxyEnabled && !vodUnlockEnabled)) return %orig;
   
-  if (proxyEnabled) {
-      NSURL *proxyURL = [NSURL URLWithString:[tweakDefaults boolForKey:@"TWAdBlockCustomProxyEnabled"]
-                                                 ? [tweakDefaults stringForKey:@"TWAdBlockProxy"]
-                                                 : PROXY_ADDR];
-      if ([proxyURL.scheme hasPrefix:@"http"])
-        return %orig([URL twab_URLWithProxyURL:proxyURL], options);
+  NSURL *finalURL = URL;
+  BOOL shouldSetDelegate = NO;
+
+  if ([URL.scheme isEqualToString:@"https"] && [URL.host isEqualToString:@"usher.ttvnw.net"]) {
+      if (proxyEnabled) {
+          NSURL *proxyURL = [NSURL URLWithString:[tweakDefaults boolForKey:@"TWAdBlockCustomProxyEnabled"]
+                                                     ? [tweakDefaults stringForKey:@"TWAdBlockProxy"]
+                                                     : PROXY_ADDR];
+          if ([proxyURL.scheme hasPrefix:@"http"]) {
+              return %orig([URL twab_URLWithProxyURL:proxyURL], options);
+          }
+      }
+      
+      NSURLComponents *components = [NSURLComponents componentsWithURL:URL resolvingAgainstBaseURL:YES];
+      components.scheme = @"twab";
+      finalURL = components.URL;
+      shouldSetDelegate = YES;
+  } else if ([URL.scheme isEqualToString:@"twab"]) {
+      shouldSetDelegate = YES;
   }
 
-  NSURLComponents *components = [NSURLComponents componentsWithURL:URL resolvingAgainstBaseURL:YES];
-  components.scheme = @"twab";
-  URL = components.URL;
-  if ((self = %orig)) {
-    [self.resourceLoader setDelegate:assetResourceLoaderDelegate
-                               queue:dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0)];
+  if (shouldSetDelegate) {
+    self = %orig(finalURL, options);
+    if (self) {
+      [self.resourceLoader setDelegate:assetResourceLoaderDelegate
+                                 queue:dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0)];
+    }
+    return self;
   }
-  return self;
+  
+  return %orig;
 }
 %end
 
@@ -334,7 +347,6 @@ static void (*orig_PlaybackAccessTokenParams_init)(void *disableHTTPS, void *has
 
 static void hook_PlaybackAccessTokenParams_init(void *disableHTTPS, void *hasAdblock, void *platform_p, void *platform_m, void *playerBackend_p, void *playerBackend_m, void *playerType_p, void *playerType_m) {
     // Force hasAdblock to 2 (some(false) in Swift Nullable<Bool>)
-    // Force platform to "web" could be done here if we knew the Swift String layout for "web"
     orig_PlaybackAccessTokenParams_init(disableHTTPS, (void *)2, platform_p, platform_m, playerBackend_p, playerBackend_m, playerType_p, playerType_m);
 }
 

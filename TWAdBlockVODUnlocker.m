@@ -21,11 +21,18 @@
     [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
     [request setValue:@"https://www.twitch.tv" forHTTPHeaderField:@"Origin"];
     [request setValue:@"https://www.twitch.tv/" forHTTPHeaderField:@"Referer"];
-    [request setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1" forHTTPHeaderField:@"User-Agent"];
 
     NSString *formattedID = vodID;
-    if (![vodID hasPrefix:@"v"] && [vodID rangeOfCharacterFromSet:[[NSCharacterSet decimalDigitCharacterSet] invertedSet]].location == NSNotFound) {
-        formattedID = [NSString stringWithFormat:@"v%@", vodID];
+    // Remove any non-digit characters if it's not starting with 'v'
+    if (![vodID hasPrefix:@"v"]) {
+        NSCharacterSet *nonDigits = [[NSCharacterSet decimalDigitCharacterSet] invertedSet];
+        if ([vodID rangeOfCharacterFromSet:nonDigits].location != NSNotFound) {
+             // Handle cases like v2/12345678 or 12345678.m3u8
+             formattedID = [vodID stringByTrimmingCharactersInSet:nonDigits];
+        }
+        if (formattedID.length > 0) {
+            formattedID = [NSString stringWithFormat:@"v%@", formattedID];
+        }
     }
 
     NSDictionary *body = @{
@@ -39,11 +46,9 @@
         NSError *jsonError;
         NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:&jsonError];
         if (jsonError || !json[@"data"] || [json[@"data"][@"video"] isEqual:[NSNull null]]) {
-            if ([formattedID hasPrefix:@"v"]) {
-                [self fetchVODMetadataWithoutV:vodID completion:completion];
-            } else {
-                completion(nil, jsonError);
-            }
+            // Try without the 'v' prefix if it failed
+            NSString *rawID = [formattedID hasPrefix:@"v"] ? [formattedID substringFromIndex:1] : formattedID;
+            [self fetchVODMetadataWithoutV:rawID completion:completion];
             return;
         }
         completion(json[@"data"][@"video"], nil);
@@ -78,7 +83,8 @@
            [lower containsString:@"errorauthorization"] ||
            [lower containsString:@"restricted=1"] ||
            [lower containsString:@"restricted=\"true\""] ||
-           [lower containsString:@"#ext-x-twitch-restricted"];
+           [lower containsString:@"#ext-x-twitch-restricted"] ||
+           [lower containsString:@"access denied"];
 }
 
 - (NSString *)reconstructManifest:(NSDictionary *)vodData forVodID:(NSString *)vodID {
@@ -108,15 +114,19 @@
     if (storyboardIndex <= 0) return nil;
     NSString *vodSpecialID = pathComponents[storyboardIndex - 1];
     
-    NSMutableString *manifest = [NSMutableString stringWithFormat:@"#EXTM3U\n#EXT-X-VERSION:3\n"];
+    // Generate a random serving ID
+    NSString *servingID = [[NSUUID UUID].UUIDString stringByReplacingOccurrencesOfString:@"-" withString:@""];
+    
+    NSMutableString *manifest = [NSMutableString stringWithFormat:@"#EXTM3U\n"];
+    [manifest appendFormat:@"#EXT-X-TWITCH-INFO:ORIGIN=\"s3\",B=\"false\",REGION=\"EU\",USER-IP=\"127.0.0.1\",SERVING-ID=\"%@\",CLUSTER=\"cloudfront_vod\",USER-COUNTRY=\"BE\",MANIFEST-CLUSTER=\"cloudfront_vod\"\n", servingID];
     
     NSDictionary *resolutions = @{
-        @"160p30": @{@"res": @"284x160", @"fps": @30, @"bw": @"638000"},
-        @"360p30": @{@"res": @"640x360", @"fps": @30, @"bw": @"1064000"},
-        @"480p30": @{@"res": @"854x480", @"fps": @30, @"bw": @"1562000"},
-        @"720p60": @{@"res": @"1280x720", @"fps": @60, @"bw": @"3708000"},
-        @"1080p60": @{@"res": @"1920x1080", @"fps": @60, @"bw": @"8254000"},
-        @"chunked": @{@"res": @"1920x1080", @"fps": @60, @"bw": @"8534000"}
+        @"160p30": @{@"res": @"284x160", @"fps": @30, @"bw": @638000},
+        @"360p30": @{@"res": @"640x360", @"fps": @30, @"bw": @1064000},
+        @"480p30": @{@"res": @"854x480", @"fps": @30, @"bw": @1562000},
+        @"720p60": @{@"res": @"1280x720", @"fps": @60, @"bw": @3708000},
+        @"1080p60": @{@"res": @"1920x1080", @"fps": @60, @"bw": @8254000},
+        @"chunked": @{@"res": @"1920x1080", @"fps": @60, @"bw": @8534000}
     };
     
     NSArray *keys = @[@"chunked", @"1080p60", @"720p60", @"480p30", @"360p30", @"160p30"];
@@ -124,23 +134,27 @@
     NSDateFormatter *dateFormatter = [[NSDateFormatter alloc] init];
     [dateFormatter setDateFormat:@"yyyy-MM-dd'T'HH:mm:ssZ"];
     NSDate *createdDate = [dateFormatter dateFromString:createdAt];
-    NSTimeInterval daysDiff = [[NSDate date] timeIntervalSinceDate:createdDate] / 86400.0;
+    NSTimeInterval daysDiff = 0;
+    if (createdDate) {
+        daysDiff = [[NSDate date] timeIntervalSinceDate:createdDate] / 86400.0;
+    }
     
+    // Use a clean version of vodID (no 'v' prefix for some URL constructions)
+    NSString *cleanVodID = [vodID hasPrefix:@"v"] ? [vodID substringFromIndex:1] : vodID;
+
     for (NSString *resKey in keys) {
         NSString *streamUrl;
         if ([broadcastType isEqualToString:@"highlight"]) {
-            streamUrl = [NSString stringWithFormat:@"twab://%@/%@/%@/highlight-%@.m3u8", domain, vodSpecialID, resKey, vodID];
+            streamUrl = [NSString stringWithFormat:@"twab://%@/%@/%@/highlight-%@.m3u8", domain, vodSpecialID, resKey, cleanVodID];
         } else if ([broadcastType isEqualToString:@"upload"] && daysDiff > 7) {
-            streamUrl = [NSString stringWithFormat:@"twab://%@/%@/%@/%@/%@/index-dvr.m3u8", domain, owner[@"login"], vodID, vodSpecialID, resKey];
+            streamUrl = [NSString stringWithFormat:@"twab://%@/%@/%@/%@/%@/index-dvr.m3u8", domain, owner[@"login"], cleanVodID, vodSpecialID, resKey];
         } else {
             streamUrl = [NSString stringWithFormat:@"twab://%@/%@/%@/index-dvr.m3u8", domain, vodSpecialID, resKey];
         }
 
         NSString *quality = [resKey isEqualToString:@"chunked"] ? @"1080p" : resKey;
-        NSString *enabled = [resKey isEqualToString:@"chunked"] ? @"YES" : @"NO";
         NSDictionary *resInfo = resolutions[resKey];
         
-        [manifest appendFormat:@"#EXT-X-MEDIA:TYPE=VIDEO,GROUP-ID=\"%@\",NAME=\"%@\",AUTOSELECT=%@,DEFAULT=%@\n", quality, quality, enabled, enabled];
         [manifest appendFormat:@"#EXT-X-STREAM-INF:BANDWIDTH=%@,CODECS=\"avc1.4D001E,mp4a.40.2\",RESOLUTION=%@,VIDEO=\"%@\",FRAME-RATE=%@\n", resInfo[@"bw"], resInfo[@"res"], quality, resInfo[@"fps"]];
         [manifest appendFormat:@"%@\n", streamUrl];
     }
@@ -159,8 +173,7 @@
         patchedBody = [patchedBody stringByReplacingOccurrencesOfString:@"-unmuted" withString:@"-muted"];
     }
     
-    // 2. Tunneling: Force all segment/playlist URLs to pass through our resource loader
-    // Replace all absolute https:// links with twab:// so AVPlayer routes them to us
+    // 2. Tunneling: Force all absolute https:// links with twab://
     if ([patchedBody containsString:@"https://"]) {
         patchedBody = [patchedBody stringByReplacingOccurrencesOfString:@"https://" withString:@"twab://"];
     }
