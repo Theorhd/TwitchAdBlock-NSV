@@ -5,6 +5,9 @@ NSBundle *tweakBundle;
 NSUserDefaults *tweakDefaults;
 TWAdBlockAssetResourceLoaderDelegate *assetResourceLoaderDelegate;
 
+// Forward declaration
+static void hideIfRestricted(UIView *view);
+
 // Server-side video ad blocking
 
 %hook NSURLSession
