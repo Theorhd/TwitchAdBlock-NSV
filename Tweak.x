@@ -5,8 +5,12 @@ NSBundle *tweakBundle;
 NSUserDefaults *tweakDefaults;
 TWAdBlockAssetResourceLoaderDelegate *assetResourceLoaderDelegate;
 
-// Server-side video ad blocking
+// 1. BLOCK UPDATE PROMPTS
+%hook TWAppUpdatePrompt
++ (void)startMonitoringSavantSettingsToShowPromptIfNeeded {}
+%end
 
+// 2. NETWORK INTERCEPTION
 %hook NSURLSession
 - (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request {
   if (![tweakDefaults boolForKey:@"TWAdBlockEnabled"]) return %orig;
@@ -24,12 +28,7 @@ TWAdBlockAssetResourceLoaderDelegate *assetResourceLoaderDelegate;
 }
 %end
 
-%hook TWHLSProvider
-- (BOOL)isLuminousV1 {
-    return NO; // Force standard HLS path
-}
-%end
-
+// 3. BYPASS AMAZON IVS SDK
 %hook IVSPlayer
 - (void)setPath:(NSURL *)path {
     if ([tweakDefaults boolForKey:@"TWAdBlockVODUnlockEnabled"] && path && [path.host isEqualToString:@"usher.ttvnw.net"]) {
@@ -42,9 +41,26 @@ TWAdBlockAssetResourceLoaderDelegate *assetResourceLoaderDelegate;
 }
 %end
 
+%hook _TtC6Twitch21PlayerCoreVideoPlayer
+- (void)player:(id)arg1 didFailWithError:(id)arg2 {
+    if ([tweakDefaults boolForKey:@"TWAdBlockVODUnlockEnabled"]) return;
+    %orig;
+}
+%end
+
+// 4. ASSET RESOURCE LOADER HOOK
 %hook AVURLAsset
 - (instancetype)initWithURL:(NSURL *)URL options:(NSDictionary<NSString *, id> *)options {
   if ([URL.scheme isEqualToString:@"twab"]) {
+      if ((self = %orig)) {
+          [self.resourceLoader setDelegate:assetResourceLoaderDelegate queue:dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0)];
+      }
+      return self;
+  }
+  if ([tweakDefaults boolForKey:@"TWAdBlockVODUnlockEnabled"] && [URL.host isEqualToString:@"usher.ttvnw.net"]) {
+      NSURLComponents *components = [NSURLComponents componentsWithURL:URL resolvingAgainstBaseURL:YES];
+      components.scheme = @"twab";
+      URL = components.URL;
       if ((self = %orig)) {
           [self.resourceLoader setDelegate:assetResourceLoaderDelegate queue:dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0)];
       }
@@ -54,6 +70,7 @@ TWAdBlockAssetResourceLoaderDelegate *assetResourceLoaderDelegate;
 }
 %end
 
+// 5. PLAYER AUTO-PLAY FORCE
 %hook AVPlayer
 - (instancetype)init {
   if ((self = %orig)) {
@@ -64,39 +81,57 @@ TWAdBlockAssetResourceLoaderDelegate *assetResourceLoaderDelegate;
 }
 %new
 - (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary *)change context:(void *)context {
-  if ([keyPath isEqualToString:@"status"] && [self status] == AVPlayerStatusReadyToPlay) {
-      [self play];
-  } else if ([keyPath isEqualToString:@"rate"] && [self rate] == 0.0 && [self status] == AVPlayerStatusReadyToPlay) {
-      [self play];
-  }
+  if ([self status] == AVPlayerStatusReadyToPlay) [self play];
 }
 %end
 
+// 6. LOW-LEVEL DATA MODEL BYPASS
 @interface _TtC9TwitchKit5Video : NSObject
 - (BOOL)currentUserIsRestricted;
 @end
-
 %hook _TtC9TwitchKit5Video
-- (BOOL)currentUserIsRestricted {
-    return [tweakDefaults boolForKey:@"TWAdBlockVODUnlockEnabled"] ? NO : %orig;
-}
+- (BOOL)currentUserIsRestricted { return NO; }
 %end
+
+// 7. BRUTAL UI REMOVAL
+static void hideIfRestricted(UIView *view) {
+    if (!view) return;
+    @try {
+        if ([view isKindOfClass:[UILabel class]]) {
+            NSString *text = [((UILabel *)view).text lowercaseString];
+            if (text && ([text containsString:@"réservé"] || [text containsString:@"abonné"] || [text containsString:@"sub"] || [text containsString:@"restricted"])) {
+                view.superview.hidden = YES;
+                return;
+            }
+        }
+        for (UIView *subview in view.subviews) hideIfRestricted(subview);
+    } @catch (id e) {}
+}
 
 @interface _TtC6Twitch30TheaterRequestErrorOverlayView : UIView
 @end
-
 %hook _TtC6Twitch30TheaterRequestErrorOverlayView
-- (void)didMoveToWindow {
-    %orig;
-    if ([tweakDefaults boolForKey:@"TWAdBlockRestrictionRemoverEnabled"]) self.hidden = YES;
-}
+- (void)didMoveToWindow { %orig; self.hidden = YES; }
+- (void)setHidden:(BOOL)hidden { %orig(YES); }
 %end
 
+%hook _TtC6Twitch21TheaterViewController
+- (void)viewDidAppear:(BOOL)animated { %orig; hideIfRestricted(self.view); }
+- (void)viewWillAppear:(BOOL)animated { %orig; hideIfRestricted(self.view); }
+%end
+
+// 8. CTOR & SYMBOLS
+static void (*orig_PlaybackAccessTokenParams_init)(id, id, id, id, id, id, id, id);
+static void hook_PlaybackAccessTokenParams_init(id a, id b, id c, id d, id e, id f, id g, id h) {
+    orig_PlaybackAccessTokenParams_init(a, (id)2, c, d, e, f, g, h);
+}
+
 %ctor {
-  tweakBundle = [NSBundle bundleWithPath:[NSBundle.mainBundle pathForResource:@"TwitchAdBlock" ofType:@"bundle"]];
-  if (!tweakBundle) tweakBundle = [NSBundle bundleWithPath:ROOT_PATH_NS(@"/Library/Application Support/TwitchAdBlock.bundle")];
+  rebind_symbols((struct rebinding[]){
+      {"_$s13TwitchGraphQL25PlaybackAccessTokenParamsV12disableHTTPS10hasAdblock8platform13playerBackend0M4TypeAC9ApolloAPI0B10QLNullableOySbG_ALSSAKySSGSStcfC", (void *)hook_PlaybackAccessTokenParams_init, (void **)&orig_PlaybackAccessTokenParams_init},
+  }, 1);
+
   tweakDefaults = [[NSUserDefaults alloc] initWithSuiteName:@"com.level3tjg.twitchadblock"];
-  
   if (![tweakDefaults objectForKey:@"TWAdBlockEnabled"]) [tweakDefaults setBool:YES forKey:@"TWAdBlockEnabled"];
   if (![tweakDefaults objectForKey:@"TWAdBlockVODUnlockEnabled"]) [tweakDefaults setBool:YES forKey:@"TWAdBlockVODUnlockEnabled"];
   if (![tweakDefaults objectForKey:@"TWAdBlockRestrictionRemoverEnabled"]) [tweakDefaults setBool:YES forKey:@"TWAdBlockRestrictionRemoverEnabled"];
