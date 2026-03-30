@@ -24,9 +24,6 @@ TWAdBlockAssetResourceLoaderDelegate *assetResourceLoaderDelegate;
 }
 %end
 
-@interface TWHLSProvider : NSObject
-@end
-
 %hook TWHLSProvider
 - (BOOL)isLuminousV1 {
     return NO; // Force standard HLS path
