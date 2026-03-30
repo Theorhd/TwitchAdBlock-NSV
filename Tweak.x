@@ -43,24 +43,49 @@ TWAdBlockAssetResourceLoaderDelegate *assetResourceLoaderDelegate;
 }
 %end
 
+@interface TWVODHLSProvider : NSObject
+@property (nonatomic, copy, readonly) NSString *vodIdentifier;
+@end
+
+%hook TWVODHLSProvider
+- (id)initWithVodIdentifier:(NSString *)arg1 analyticsController:(id)arg2 httpManager:(id)arg3 {
+    return %orig;
+}
+%end
+
+%hook IVSPlayer
+- (void)setPath:(NSURL *)path {
+    if ([tweakDefaults boolForKey:@"TWAdBlockVODUnlockEnabled"]) {
+        if (path && [path.host isEqualToString:@"usher.ttvnw.net"]) {
+            // Force twab scheme to trigger our ResourceLoader
+            NSURLComponents *components = [NSURLComponents componentsWithURL:path resolvingAgainstBaseURL:YES];
+            components.scheme = @"twab";
+            %orig(components.URL);
+            return;
+        }
+    }
+    %orig;
+}
+%end
+
 %hook AVURLAsset
 - (instancetype)initWithURL:(NSURL *)URL options:(NSDictionary<NSString *, id> *)options {
   BOOL adBlockEnabled = [tweakDefaults boolForKey:@"TWAdBlockEnabled"];
-  BOOL proxyEnabled = [tweakDefaults boolForKey:@"TWAdBlockProxyEnabled"];
   BOOL vodUnlockEnabled = [tweakDefaults boolForKey:@"TWAdBlockVODUnlockEnabled"];
 
-  if (!adBlockEnabled || (!proxyEnabled && !vodUnlockEnabled) ||
+  // If it's already our custom scheme, we must set the delegate
+  if ([URL.scheme isEqualToString:@"twab"]) {
+      if ((self = %orig)) {
+          [self.resourceLoader setDelegate:assetResourceLoaderDelegate
+                                   queue:dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0)];
+      }
+      return self;
+  }
+
+  if (!adBlockEnabled || !vodUnlockEnabled ||
       ![URL.scheme isEqualToString:@"https"] || ![URL.host isEqualToString:@"usher.ttvnw.net"])
     return %orig;
   
-  if (proxyEnabled) {
-      NSURL *proxyURL = [NSURL URLWithString:[tweakDefaults boolForKey:@"TWAdBlockCustomProxyEnabled"]
-                                                 ? [tweakDefaults stringForKey:@"TWAdBlockProxy"]
-                                                 : PROXY_ADDR];
-      if ([proxyURL.scheme hasPrefix:@"http"])
-        return %orig([URL twab_URLWithProxyURL:proxyURL], options);
-  }
-
   NSURLComponents *components = [NSURLComponents componentsWithURL:URL resolvingAgainstBaseURL:YES];
   components.scheme = @"twab";
   URL = components.URL;
@@ -337,6 +362,20 @@ static void hook_PlaybackAccessTokenParams_init(void *disableHTTPS, void *hasAdb
     // Force platform to "web" could be done here if we knew the Swift String layout for "web"
     orig_PlaybackAccessTokenParams_init(disableHTTPS, (void *)2, platform_p, platform_m, playerBackend_p, playerBackend_m, playerType_p, playerType_m);
 }
+
+%hook IVSPlayer
+- (void)setPath:(NSURL *)path {
+    if ([tweakDefaults boolForKey:@"TWAdBlockVODUnlockEnabled"]) {
+        if ([path.host isEqualToString:@"usher.ttvnw.net"] && [path.scheme isEqualToString:@"https"]) {
+            NSURLComponents *components = [NSURLComponents componentsWithURL:path resolvingAgainstBaseURL:YES];
+            components.scheme = @"twab";
+            %orig(components.URL);
+            return;
+        }
+    }
+    %orig;
+}
+%end
 
 %ctor {
   rebind_symbols(
