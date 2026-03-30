@@ -268,6 +268,8 @@ static void *hook_swift_unknownObjectWeakLoadStrong(void *ref) {
                     errorOverlay.alpha = 0.0;
                 }
             }
+            // Appel de la fonction pour scanner et cacher les textes de restriction
+            hideIfRestricted([self view]);
         } @catch (NSException *e) {}
     }
 }
