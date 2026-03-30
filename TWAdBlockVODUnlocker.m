@@ -13,6 +13,11 @@
 }
 
 - (void)fetchVODMetadata:(NSString *)vodID completion:(void (^)(NSDictionary *metadata, NSError *error))completion {
+    if (!vodID || vodID.length < 4) {
+        completion(nil, [NSError errorWithDomain:@"TWAB" code:400 userInfo:nil]);
+        return;
+    }
+
     NSURL *url = [NSURL URLWithString:@"https://gql.twitch.tv/gql"];
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
     [request setHTTPMethod:@"POST"];
@@ -20,7 +25,6 @@
     [request setValue:@"application/json" forHTTPHeaderField:@"Accept"];
     [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
     [request setValue:@"https://www.twitch.tv" forHTTPHeaderField:@"Origin"];
-    [request setValue:@"https://www.twitch.tv/" forHTTPHeaderField:@"Referer"];
     [request setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1" forHTTPHeaderField:@"User-Agent"];
 
     NSString *formattedID = vodID;
@@ -38,7 +42,8 @@
         if (error) { completion(nil, error); return; }
         NSError *jsonError;
         NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:&jsonError];
-        if (jsonError || !json[@"data"] || [json[@"data"][@"video"] isEqual:[NSNull null]]) {
+        id video = json[@"data"][@"video"];
+        if (jsonError || !video || [video isEqual:[NSNull null]]) {
             if ([formattedID hasPrefix:@"v"]) {
                 [self fetchVODMetadataWithoutV:vodID completion:completion];
             } else {
@@ -46,7 +51,7 @@
             }
             return;
         }
-        completion(json[@"data"][@"video"], nil);
+        completion(video, nil);
     }] resume];
 }
 
@@ -55,8 +60,6 @@
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
     [request setHTTPMethod:@"POST"];
     [request setValue:@"kimne78kx3ncx6brgo4mv6wki5h1ko" forHTTPHeaderField:@"Client-Id"];
-    [request setValue:@"application/json" forHTTPHeaderField:@"Accept"];
-    [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
     
     NSDictionary *body = @{
         @"query": @"query($id: ID!) { video(id: $id) { broadcastType, createdAt, seekPreviewsURL, owner { login } }}",
@@ -71,29 +74,20 @@
 }
 
 - (BOOL)isManifestRestricted:(NSData *)data {
+    if (!data) return NO;
     NSString *body = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
     if (!body) return NO;
     NSString *lower = [body lowercaseString];
-    return [lower containsString:@"vod_manifest_restricted"] ||
-           [lower containsString:@"errorauthorization"] ||
-           [lower containsString:@"restricted=1"] ||
-           [lower containsString:@"restricted=\"true\""] ||
-           [lower containsString:@"#ext-x-twitch-restricted"];
+    return [lower containsString:@"restricted"] || [lower containsString:@"errorauthorization"] || [lower containsString:@"denied"];
 }
 
 - (NSString *)reconstructManifest:(NSDictionary *)vodData forVodID:(NSString *)vodID {
     if (!vodData || ![vodData isKindOfClass:[NSDictionary class]]) return nil;
     
     NSString *seekPreviewsURL = vodData[@"seekPreviewsURL"];
-    NSDictionary *owner = vodData[@"owner"];
-    NSString *broadcastType = [vodData[@"broadcastType"] lowercaseString];
-    NSString *createdAt = vodData[@"createdAt"];
-    
-    if (!seekPreviewsURL || !owner) return nil;
+    if (!seekPreviewsURL || [seekPreviewsURL isEqual:[NSNull null]]) return nil;
     
     NSURL *previewURL = [NSURL URLWithString:seekPreviewsURL];
-    if (!previewURL) return nil;
-    
     NSString *domain = previewURL.host;
     NSArray *pathComponents = previewURL.pathComponents;
     
@@ -104,44 +98,31 @@
             break;
         }
     }
-    
     if (storyboardIndex <= 0) return nil;
     NSString *vodSpecialID = pathComponents[storyboardIndex - 1];
     
-    NSMutableString *manifest = [NSMutableString stringWithFormat:@"#EXTM3U\n#EXT-X-VERSION:3\n"];
+    // Mandatory HLS tags for iOS VOD playback
+    NSMutableString *manifest = [NSMutableString stringWithFormat:@"#EXTM3U\n"
+                                 "#EXT-X-VERSION:3\n"
+                                 "#EXT-X-PLAYLIST-TYPE:VOD\n"
+                                 "#EXT-X-TARGETDURATION:10\n"];
     
     NSDictionary *resolutions = @{
-        @"160p30": @{@"res": @"284x160", @"fps": @30, @"bw": @"638000"},
-        @"360p30": @{@"res": @"640x360", @"fps": @30, @"bw": @"1064000"},
-        @"480p30": @{@"res": @"854x480", @"fps": @30, @"bw": @"1562000"},
-        @"720p60": @{@"res": @"1280x720", @"fps": @60, @"bw": @"3708000"},
+        @"chunked": @{@"res": @"1920x1080", @"fps": @60, @"bw": @"8534000"},
         @"1080p60": @{@"res": @"1920x1080", @"fps": @60, @"bw": @"8254000"},
-        @"chunked": @{@"res": @"1920x1080", @"fps": @60, @"bw": @"8534000"}
+        @"720p60": @{@"res": @"1280x720", @"fps": @60, @"bw": @"3708000"},
+        @"480p30": @{@"res": @"854x480", @"fps": @30, @"bw": @"1562000"},
+        @"360p30": @{@"res": @"640x360", @"fps": @30, @"bw": @"1064000"}
     };
     
-    NSArray *keys = @[@"chunked", @"1080p60", @"720p60", @"480p30", @"360p30", @"160p30"];
-    
-    NSDateFormatter *dateFormatter = [[NSDateFormatter alloc] init];
-    [dateFormatter setDateFormat:@"yyyy-MM-dd'T'HH:mm:ssZ"];
-    NSDate *createdDate = [dateFormatter dateFromString:createdAt];
-    NSTimeInterval daysDiff = [[NSDate date] timeIntervalSinceDate:createdDate] / 86400.0;
+    NSArray *keys = @[@"chunked", @"1080p60", @"720p60", @"480p30", @"360p30"];
     
     for (NSString *resKey in keys) {
-        NSString *streamUrl;
-        if ([broadcastType isEqualToString:@"highlight"]) {
-            streamUrl = [NSString stringWithFormat:@"twab://%@/%@/%@/highlight-%@.m3u8", domain, vodSpecialID, resKey, vodID];
-        } else if ([broadcastType isEqualToString:@"upload"] && daysDiff > 7) {
-            streamUrl = [NSString stringWithFormat:@"twab://%@/%@/%@/%@/%@/index-dvr.m3u8", domain, owner[@"login"], vodID, vodSpecialID, resKey];
-        } else {
-            streamUrl = [NSString stringWithFormat:@"twab://%@/%@/%@/index-dvr.m3u8", domain, vodSpecialID, resKey];
-        }
-
-        NSString *quality = [resKey isEqualToString:@"chunked"] ? @"1080p" : resKey;
-        NSString *enabled = [resKey isEqualToString:@"chunked"] ? @"YES" : @"NO";
+        NSString *streamUrl = [NSString stringWithFormat:@"twab://%@/%@/%@/index-dvr.m3u8", domain, vodSpecialID, resKey];
         NSDictionary *resInfo = resolutions[resKey];
         
-        [manifest appendFormat:@"#EXT-X-MEDIA:TYPE=VIDEO,GROUP-ID=\"%@\",NAME=\"%@\",AUTOSELECT=%@,DEFAULT=%@\n", quality, quality, enabled, enabled];
-        [manifest appendFormat:@"#EXT-X-STREAM-INF:BANDWIDTH=%@,CODECS=\"avc1.4D001E,mp4a.40.2\",RESOLUTION=%@,VIDEO=\"%@\",FRAME-RATE=%@\n", resInfo[@"bw"], resInfo[@"res"], quality, resInfo[@"fps"]];
+        [manifest appendFormat:@"#EXT-X-MEDIA:TYPE=VIDEO,GROUP-ID=\"%@\",NAME=\"%@\",AUTOSELECT=YES,DEFAULT=%@\n", resKey, resKey, [resKey isEqualToString:@"chunked"] ? @"YES" : @"NO"];
+        [manifest appendFormat:@"#EXT-X-STREAM-INF:BANDWIDTH=%@,RESOLUTION=%@,FRAME-RATE=%@\n", resInfo[@"bw"], resInfo[@"res"], resInfo[@"fps"]];
         [manifest appendFormat:@"%@\n", streamUrl];
     }
     
@@ -151,20 +132,8 @@
 - (NSData *)patchPlaylistData:(NSData *)data {
     NSString *body = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
     if (!body) return data;
-    
-    NSString *patchedBody = body;
-    
-    // 1. Patch unmuted -> muted
-    if ([patchedBody containsString:@"-unmuted"]) {
-        patchedBody = [patchedBody stringByReplacingOccurrencesOfString:@"-unmuted" withString:@"-muted"];
-    }
-    
-    // 2. Tunneling: Force all segment/playlist URLs to pass through our resource loader
-    // Replace all absolute https:// links with twab:// so AVPlayer routes them to us
-    if ([patchedBody containsString:@"https://"]) {
-        patchedBody = [patchedBody stringByReplacingOccurrencesOfString:@"https://" withString:@"twab://"];
-    }
-    
+    NSString *patchedBody = [body stringByReplacingOccurrencesOfString:@"-unmuted" withString:@"-muted"];
+    patchedBody = [patchedBody stringByReplacingOccurrencesOfString:@"https://" withString:@"twab://"];
     return [patchedBody dataUsingEncoding:NSUTF8StringEncoding];
 }
 
