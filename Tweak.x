@@ -56,7 +56,7 @@ TWAdBlockAssetResourceLoaderDelegate *assetResourceLoaderDelegate;
 %hook IVSPlayer
 - (void)setPath:(NSURL *)path {
     if ([tweakDefaults boolForKey:@"TWAdBlockVODUnlockEnabled"]) {
-        if (path && [path.host isEqualToString:@"usher.ttvnw.net"]) {
+        if (path && [path.host isEqualToString:@"usher.ttvnw.net"] && [path.scheme isEqualToString:@"https"]) {
             // Force twab scheme to trigger our ResourceLoader
             NSURLComponents *components = [NSURLComponents componentsWithURL:path resolvingAgainstBaseURL:YES];
             components.scheme = @"twab";
@@ -73,7 +73,6 @@ TWAdBlockAssetResourceLoaderDelegate *assetResourceLoaderDelegate;
   BOOL adBlockEnabled = [tweakDefaults boolForKey:@"TWAdBlockEnabled"];
   BOOL vodUnlockEnabled = [tweakDefaults boolForKey:@"TWAdBlockVODUnlockEnabled"];
 
-  // If it's already our custom scheme, we must set the delegate
   if ([URL.scheme isEqualToString:@"twab"]) {
       if ((self = %orig)) {
           [self.resourceLoader setDelegate:assetResourceLoaderDelegate
@@ -358,24 +357,8 @@ static void hideIfRestricted(UIView *view) {
 static void (*orig_PlaybackAccessTokenParams_init)(void *disableHTTPS, void *hasAdblock, void *platform_p, void *platform_m, void *playerBackend_p, void *playerBackend_m, void *playerType_p, void *playerType_m);
 
 static void hook_PlaybackAccessTokenParams_init(void *disableHTTPS, void *hasAdblock, void *platform_p, void *platform_m, void *playerBackend_p, void *playerBackend_m, void *playerType_p, void *playerType_m) {
-    // Force hasAdblock to 2 (some(false) in Swift Nullable<Bool>)
-    // Force platform to "web" could be done here if we knew the Swift String layout for "web"
     orig_PlaybackAccessTokenParams_init(disableHTTPS, (void *)2, platform_p, platform_m, playerBackend_p, playerBackend_m, playerType_p, playerType_m);
 }
-
-%hook IVSPlayer
-- (void)setPath:(NSURL *)path {
-    if ([tweakDefaults boolForKey:@"TWAdBlockVODUnlockEnabled"]) {
-        if ([path.host isEqualToString:@"usher.ttvnw.net"] && [path.scheme isEqualToString:@"https"]) {
-            NSURLComponents *components = [NSURLComponents componentsWithURL:path resolvingAgainstBaseURL:YES];
-            components.scheme = @"twab";
-            %orig(components.URL);
-            return;
-        }
-    }
-    %orig;
-}
-%end
 
 %ctor {
   rebind_symbols(
