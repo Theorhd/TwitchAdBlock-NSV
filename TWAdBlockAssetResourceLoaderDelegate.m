@@ -9,15 +9,12 @@ extern NSUserDefaults *tweakDefaults;
     if (!loadingRequest.contentInformationRequest) return;
     
     NSString *uti = @"public.mpeg-ts";
-    NSString *contentType = @"video/mp2t";
     
     NSString *path = loadingRequest.request.URL.path.lowercaseString;
     if ([path hasSuffix:@".m3u8"] || [path hasSuffix:@".m3u"]) {
         uti = @"com.apple.mpegurl";
-        contentType = @"application/vnd.apple.mpegurl";
     } else if ([path hasSuffix:@".mp4"]) {
         uti = @"public.mpeg-4";
-        contentType = @"video/mp4";
     }
     
     loadingRequest.contentInformationRequest.contentType = uti;
