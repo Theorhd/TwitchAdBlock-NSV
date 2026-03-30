@@ -231,7 +231,12 @@ static void hideIfRestricted(UIView *view) {
             UILabel *label = (UILabel *)view;
             NSString *text = [label.text lowercaseString];
             if (text && ([text containsString:@"réservé"] || [text containsString:@"abonné"] || [text containsString:@"restricted"] || [text containsString:@"sub"])) {
-                view.superview.hidden = YES;
+                // Remonter jusqu'au conteneur parent pour tout cacher (l'overlay entier)
+                UIView *parent = view.superview;
+                while (parent && parent.subviews.count < 10) { // Remonter modérément
+                    parent.hidden = YES;
+                    parent = parent.superview;
+                }
                 return;
             }
         }
@@ -241,90 +246,35 @@ static void hideIfRestricted(UIView *view) {
     } @catch (NSException *e) {}
 }
 
-@interface _TtC6Twitch21PlayerCoreCoordinator : NSObject
-@end
-
-@interface _TtC6Twitch26PlaybackRequestInterceptor : NSObject
-@end
-
-%hook _TtC6Twitch21PlayerCoreCoordinator
-- (void)handlePlaybackStatusUpdate:(id)arg1 {
-    %orig;
-}
-%end
-
-@interface _TtC9TwitchKit5Video : NSObject
-- (BOOL)currentUserIsRestricted;
-@end
-
-%hook _TtC9TwitchKit5Video
-- (BOOL)currentUserIsRestricted {
-    if ([tweakDefaults boolForKey:@"TWAdBlockVODUnlockEnabled"]) {
-        return NO;
-    }
-    return %orig;
-}
-%end
-
-%hook _TtC6Twitch30TheaterRequestErrorOverlayView
-- (void)didMoveToWindow {
-    %orig;
-    if ([tweakDefaults boolForKey:@"TWAdBlockRestrictionRemoverEnabled"]) {
-        @try { self.hidden = YES; } @catch (NSException *e) {}
-    }
-}
-- (void)setHidden:(BOOL)hidden {
-    if ([tweakDefaults boolForKey:@"TWAdBlockRestrictionRemoverEnabled"]) {
-        %orig(YES);
-    } else {
-        %orig;
-    }
-}
-%end
-
-%hook _TtC6Twitch19TheaterMetadataView
-- (void)layoutSubviews {
-    %orig;
-    if ([tweakDefaults boolForKey:@"TWAdBlockRestrictionRemoverEnabled"]) {
-        @try {
-            UIView *subOnlyBanner = [(id)self valueForKey:@"subOnlyLiveBannerView"];
-            if (subOnlyBanner) subOnlyBanner.hidden = YES;
-        } @catch (NSException *e) {}
-    }
-}
-%end
-
-%hook _TtC6Twitch31SubscriptionBenefitsSummaryView
-- (void)didMoveToWindow {
-    %orig;
-    if ([tweakDefaults boolForKey:@"TWAdBlockRestrictionRemoverEnabled"]) {
-        @try { self.hidden = YES; } @catch (NSException *e) {}
-    }
-}
-%end
-
-%hook _TtC6Twitch20UpsellViewController
-- (void)viewWillAppear:(BOOL)animated {
-    %orig;
-    if ([tweakDefaults boolForKey:@"TWAdBlockRestrictionRemoverEnabled"]) {
-        @try { [self dismissViewControllerAnimated:YES completion:nil]; } @catch (NSException *e) {}
-    }
-}
-%end
-
 %hook _TtC6Twitch21TheaterViewController
 - (void)viewDidAppear:(BOOL)animated {
     %orig;
     if ([tweakDefaults boolForKey:@"TWAdBlockRestrictionRemoverEnabled"]) {
-        @try {
-            id theaterView = [(id)self valueForKey:@"theaterView"];
-            if (theaterView) {
-                UIView *errorOverlay = [(id)theaterView valueForKey:@"requestErrorOverlayView"];
-                if (errorOverlay) errorOverlay.hidden = YES;
-            }
-            hideIfRestricted([(id)self view]);
-        } @catch (NSException *e) {}
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            @try {
+                id theaterView = [(id)self valueForKey:@"theaterView"];
+                if (theaterView) {
+                    UIView *errorOverlay = [(id)theaterView valueForKey:@"requestErrorOverlayView"];
+                    if (errorOverlay) errorOverlay.hidden = YES;
+                }
+                hideIfRestricted([(id)self view]);
+            } @catch (NSException *e) {}
+        });
     }
+}
+%end
+
+// Hook sur l'intercepteur de requêtes de lecture pour forcer la réussite
+%hook _TtC6Twitch26PlaybackRequestInterceptor
+- (void)handlePlaybackAccessTokenSuccess:(id)arg1 {
+    %orig;
+}
+- (void)handlePlaybackAccessTokenFailure:(id)arg1 {
+    if ([tweakDefaults boolForKey:@"TWAdBlockVODUnlockEnabled"]) {
+        // Simuler un succès ou ignorer l'échec car notre proxy va reconstruire le manifest
+        return;
+    }
+    %orig;
 }
 %end
 

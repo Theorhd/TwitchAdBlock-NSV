@@ -8,19 +8,31 @@ extern NSUserDefaults *tweakDefaults;
 - (void)fillContentInformation:(AVAssetResourceLoadingRequest *)loadingRequest fromResponse:(NSHTTPURLResponse *)response data:(NSData *)data {
     if (!loadingRequest.contentInformationRequest) return;
     
-    NSString *mimeType = response.MIMEType;
-    NSString *uti = @"public.mpeg-ts"; // Default
-    if ([mimeType containsString:@"mpegurl"] || [loadingRequest.request.URL.pathExtension isEqualToString:@"m3u8"]) {
+    NSString *uti = @"public.mpeg-ts";
+    NSString *contentType = response.allHeaderFields[@"Content-Type"] ?: @"video/mp2t";
+    
+    if ([contentType containsString:@"mpegurl"] || [loadingRequest.request.URL.pathExtension isEqualToString:@"m3u8"]) {
         uti = @"com.apple.mpegurl";
-    } else if ([mimeType containsString:@"mp4"] || [loadingRequest.request.URL.pathExtension isEqualToString:@"mp4"]) {
+        contentType = @"application/vnd.apple.mpegurl";
+    } else if ([contentType containsString:@"mp4"] || [loadingRequest.request.URL.pathExtension isEqualToString:@"mp4"]) {
         uti = @"public.mpeg-4";
+        contentType = @"video/mp4";
     }
     
     loadingRequest.contentInformationRequest.contentType = uti;
     loadingRequest.contentInformationRequest.byteRangeAccessSupported = YES;
     
-    // Crucial: Use the data length we actually have if it's a reconstructed manifest
-    loadingRequest.contentInformationRequest.contentLength = data.length;
+    // Si la réponse est un 206 (Partial Content), extraire la taille totale depuis Content-Range
+    long long totalLength = data.length;
+    NSString *contentRange = response.allHeaderFields[@"Content-Range"];
+    if (contentRange) {
+        NSArray *parts = [contentRange componentsSeparatedByString:@"/"];
+        if (parts.count > 1) {
+            totalLength = [parts.lastObject longLongValue];
+        }
+    }
+    
+    loadingRequest.contentInformationRequest.contentLength = totalLength;
 }
 
 - (BOOL)handleLoadingRequest:(AVAssetResourceLoadingRequest *)loadingRequest {
@@ -33,14 +45,14 @@ extern NSUserDefaults *tweakDefaults;
 
   NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:components.URL];
   
-  // Set headers that Twitch/Cloudfront might expect
+  // Copier les headers d'origine (important pour les Range requests de segments)
+  [request setAllHTTPHeaderFields:loadingRequest.request.allHTTPHeaderFields];
   [request setValue:@"https://www.twitch.tv" forHTTPHeaderField:@"Origin"];
   [request setValue:@"https://www.twitch.tv/" forHTTPHeaderField:@"Referer"];
   [request setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1" forHTTPHeaderField:@"User-Agent"];
 
   BOOL isUsher = [request.URL.host isEqualToString:@"usher.ttvnw.net"];
-  BOOL isVOD = isUsher && [request.URL.path containsString:@"/vod/"];
-  BOOL isMasterManifest = isVOD && ![request.URL.path containsString:@"index-dvr"] && ![request.URL.path containsString:@"highlight"];
+  BOOL isMasterManifest = isUsher && [request.URL.path containsString:@"/vod/"] && ![request.URL.path containsString:@"index-dvr"] && ![request.URL.path containsString:@"highlight"];
   BOOL vodUnlockEnabled = [tweakDefaults boolForKey:@"TWAdBlockVODUnlockEnabled"];
   BOOL proxyEnabled = [tweakDefaults boolForKey:@"TWAdBlockProxyEnabled"];
 
@@ -56,31 +68,31 @@ extern NSUserDefaults *tweakDefaults;
                 NSHTTPURLResponse *httpResponse = (NSHTTPURLResponse *)response;
                 TWAdBlockVODUnlocker *unlocker = [TWAdBlockVODUnlocker sharedInstance];
                 
-                // 1. Check if we need to reconstruct the master manifest
+                // 1. Reconstruction du Master Manifest si restreint ou erreur 403/401
                 if (isMasterManifest && vodUnlockEnabled && (httpResponse.statusCode >= 400 || [unlocker isManifestRestricted:data])) {
                     NSString *vodID = [request.URL.lastPathComponent stringByDeletingPathExtension];
                     [unlocker fetchVODMetadata:vodID completion:^(NSDictionary *metadata, NSError *gqlError) {
-                        NSData *finalData = data;
                         if (metadata && !gqlError) {
                             NSString *fakeManifest = [unlocker reconstructManifest:metadata forVodID:vodID];
                             if (fakeManifest) {
-                                finalData = [fakeManifest dataUsingEncoding:NSUTF8StringEncoding];
-                                // Use a fake 200 response for the reconstructed manifest to avoid player confusion
+                                NSData *finalData = [fakeManifest dataUsingEncoding:NSUTF8StringEncoding];
+                                // Créer une fausse réponse 200 OK pour ne pas effrayer AVPlayer
                                 NSHTTPURLResponse *fakeResponse = [[NSHTTPURLResponse alloc] initWithURL:request.URL statusCode:200 HTTPVersion:@"HTTP/1.1" headerFields:@{@"Content-Type": @"application/vnd.apple.mpegurl"}];
                                 [self fillContentInformation:loadingRequest fromResponse:fakeResponse data:finalData];
-                            } else {
-                                [self fillContentInformation:loadingRequest fromResponse:httpResponse data:finalData];
+                                [dataRequest respondWithData:finalData];
+                                [loadingRequest finishLoading];
+                                return;
                             }
-                        } else {
-                            [self fillContentInformation:loadingRequest fromResponse:httpResponse data:finalData];
                         }
-                        [dataRequest respondWithData:finalData];
+                        // Fallback si GQL échoue
+                        [self fillContentInformation:loadingRequest fromResponse:httpResponse data:data];
+                        [dataRequest respondWithData:data];
                         [loadingRequest finishLoading];
                     }];
                     return;
                 }
 
-                // 2. Handle sub-playlists and segments
+                // 2. Patch des sub-playlists (.m3u8) pour corriger les segments unmuted
                 NSData *finalData = data;
                 if ([request.URL.pathExtension isEqualToString:@"m3u8"]) {
                     finalData = [unlocker patchPlaylistData:data];

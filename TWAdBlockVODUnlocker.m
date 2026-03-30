@@ -113,12 +113,12 @@
     
     if (storyboardIndex <= 0) return nil;
     NSString *vodSpecialID = pathComponents[storyboardIndex - 1];
-    
-    // Generate a random serving ID
     NSString *servingID = [[NSUUID UUID].UUIDString stringByReplacingOccurrencesOfString:@"-" withString:@""];
     
+    // Manifest Master plus complet pour iOS
     NSMutableString *manifest = [NSMutableString stringWithFormat:@"#EXTM3U\n"];
-    [manifest appendFormat:@"#EXT-X-TWITCH-INFO:ORIGIN=\"s3\",B=\"false\",REGION=\"EU\",USER-IP=\"127.0.0.1\",SERVING-ID=\"%@\",CLUSTER=\"cloudfront_vod\",USER-COUNTRY=\"BE\",MANIFEST-CLUSTER=\"cloudfront_vod\"\n", servingID];
+    [manifest appendFormat:@"#EXT-X-VERSION:3\n"];
+    [manifest appendFormat:@"#EXT-X-TWITCH-INFO:ORIGIN=\"s3\",B=\"false\",REGION=\"EU\",USER-IP=\"127.0.0.1\",SERVING-ID=\"%@\",CLUSTER=\"cloudfront_vod\",USER-COUNTRY=\"FR\",MANIFEST-CLUSTER=\"cloudfront_vod\"\n", servingID];
     
     NSDictionary *resolutions = @{
         @"160p30": @{@"res": @"284x160", @"fps": @30, @"bw": @638000},
@@ -134,12 +134,8 @@
     NSDateFormatter *dateFormatter = [[NSDateFormatter alloc] init];
     [dateFormatter setDateFormat:@"yyyy-MM-dd'T'HH:mm:ssZ"];
     NSDate *createdDate = [dateFormatter dateFromString:createdAt];
-    NSTimeInterval daysDiff = 0;
-    if (createdDate) {
-        daysDiff = [[NSDate date] timeIntervalSinceDate:createdDate] / 86400.0;
-    }
+    NSTimeInterval daysDiff = createdDate ? [[NSDate date] timeIntervalSinceDate:createdDate] / 86400.0 : 0;
     
-    // Use a clean version of vodID (no 'v' prefix for some URL constructions)
     NSString *cleanVodID = [vodID hasPrefix:@"v"] ? [vodID substringFromIndex:1] : vodID;
 
     for (NSString *resKey in keys) {
@@ -152,10 +148,11 @@
             streamUrl = [NSString stringWithFormat:@"twab://%@/%@/%@/index-dvr.m3u8", domain, vodSpecialID, resKey];
         }
 
-        NSString *quality = [resKey isEqualToString:@"chunked"] ? @"1080p" : resKey;
+        NSString *quality = [resKey isEqualToString:@"chunked"] ? @"1080p (source)" : resKey;
         NSDictionary *resInfo = resolutions[resKey];
         
-        [manifest appendFormat:@"#EXT-X-STREAM-INF:BANDWIDTH=%@,CODECS=\"avc1.4D001E,mp4a.40.2\",RESOLUTION=%@,VIDEO=\"%@\",FRAME-RATE=%@\n", resInfo[@"bw"], resInfo[@"res"], quality, resInfo[@"fps"]];
+        [manifest appendFormat:@"#EXT-X-MEDIA:TYPE=VIDEO,GROUP-ID=\"%@\",NAME=\"%@\",AUTOSELECT=YES,DEFAULT=%@\n", resKey, quality, [resKey isEqualToString:@"chunked"] ? @"YES" : @"NO"];
+        [manifest appendFormat:@"#EXT-X-STREAM-INF:BANDWIDTH=%@,CODECS=\"avc1.4D001E,mp4a.40.2\",RESOLUTION=%@,VIDEO=\"%@\",FRAME-RATE=%@\n", resInfo[@"bw"], resInfo[@"res"], resKey, resInfo[@"fps"]];
         [manifest appendFormat:@"%@\n", streamUrl];
     }
     
@@ -166,16 +163,20 @@
     NSString *body = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
     if (!body) return data;
     
+    // Patch crucial pour éviter les 403 sur les segments audio protégés
     NSString *patchedBody = body;
-    
-    // 1. Patch unmuted -> muted
     if ([patchedBody containsString:@"-unmuted"]) {
         patchedBody = [patchedBody stringByReplacingOccurrencesOfString:@"-unmuted" withString:@"-muted"];
     }
     
-    // 2. Tunneling: Force all absolute https:// links with twab://
+    // Forcer le passage par notre proxy pour tous les liens absolus
     if ([patchedBody containsString:@"https://"]) {
         patchedBody = [patchedBody stringByReplacingOccurrencesOfString:@"https://" withString:@"twab://"];
+    }
+    
+    // Ajouter les tags VOD manquants si c'est une sub-playlist
+    if ([patchedBody containsString:@"#EXT-X-TARGETDURATION"] && ![patchedBody containsString:@"#EXT-X-PLAYLIST-TYPE"]) {
+        patchedBody = [patchedBody stringByReplacingOccurrencesOfString:@"#EXTM3U\n" withString:@"#EXTM3U\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXT-X-ALLOW-CACHE:YES\n"];
     }
     
     return [patchedBody dataUsingEncoding:NSUTF8StringEncoding];
